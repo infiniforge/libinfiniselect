@@ -158,7 +158,7 @@ as JSPF; each track's `location` is authoritative, while selection extras and
 InfiniSelect.open(activity, OpenRequest(
     clientId = "infinimedia",
     displayName = "InfiniMedia",
-    mimeTypes = listOf("audio/*", "application/xspf+xml", "application/jspf+json"),
+    mimeTypes = listOf("audio/*", "video/*", "image/*", "application/xspf+xml", "application/jspf+json"),
     allowMultiple = true,
     multipleSelectionDelivery = MultipleSelectionDelivery.JSPF,
     metadataFormat = SelectionMetadataFormat.XML,
@@ -175,14 +175,15 @@ Parse results with `InfiniSelect.readResult(context, data)`. Generated JSPF
 and XML documents are served from the consuming app's cache through a
 read-only provider and expire after 24 hours.
 
-`allowRecursiveAudioDirectories` makes a long press on a directory in
-InfiniFolder recursively enumerate supported audio files through its storage
-provider and return them through the same JSPF flow. Symlink directories are
-not followed; unreadable folders and scan limits are reported. An optional
-`OpenRequest.progressReceiver` receives `RESULT_LOADING_STARTED`,
-`RESULT_LOADING_PROGRESS`, and `RESULT_LOADING_FAILED` while the selector
-closes and the enumeration continues. Each result includes a human-readable
-progress label and folder/track counts. Selected items also include their
+`allowRecursiveAudioDirectories` retains its legacy field name. When enabled, a
+long press on a directory in InfiniFolder recursively enumerates files matching
+the request's MIME and extension filters through its storage provider. InfiniMedia
+requests audio, video and image formats, so this flow queues all supported media
+through the same JSPF result. Symlink directories are not followed; unreadable
+folders and scan limits are reported. An optional `OpenRequest.progressReceiver`
+receives `RESULT_LOADING_STARTED`, `RESULT_LOADING_PROGRESS`, and
+`RESULT_LOADING_FAILED` while the selector closes and enumeration continues. Each
+result includes a human-readable progress label and folder/item counts. Selected items also include their
 parent directory content URI and display name in `SelectionItem`, the parallel
 `EXTRA_ITEM_DIRECTORY_URIS` / `EXTRA_ITEM_DIRECTORY_NAMES` arrays, and the
 generated JSPF InfiniSelect extension fields. `directoryReference` pairs the
@@ -209,7 +210,7 @@ python3 scripts/fetch-dependencies.py
 
 There are no InfiniSuite dependencies. No parent or sibling checkout is read.
 
-See [LICENSE.md](LICENSE.md) for the current license status.
+Original code is licensed under MIT; see [LICENSE.md](LICENSE.md).
 
 ## Android storage contract
 
