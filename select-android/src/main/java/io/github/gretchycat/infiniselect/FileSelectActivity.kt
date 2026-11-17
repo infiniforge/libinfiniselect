@@ -89,22 +89,26 @@ class FileSelectActivity : Activity() {
             if (request.newFileType == null) launchSafPicker() else showSourceChooser()
             return
         }
-        if (isInfiniFolderInstalled()) {
-            val selection = Intent(FileSelectionContract.ACTION_SELECT)
-                .setPackage(INFINIFOLDER_PACKAGE)
-                .putExtras(request.toBundle())
-                // InfiniFolder completes selection through a ResultReceiver, so
-                // Activity.getCallingPackage() is not reliable in its adapter.
-                .putExtra(FileSelectionContract.EXTRA_REQUESTING_PACKAGE, packageName)
-            waitingForInfiniFolder = true
-            try {
-                startActivityForResult(selection, REQUEST_INFINIFOLDER)
-                return
-            } catch (_: Exception) {
-                waitingForInfiniFolder = false
-            }
-        }
+        if (isInfiniFolderInstalled() && launchInfiniFolderPicker()) return
         showSourceChooser()
+    }
+
+    private fun launchInfiniFolderPicker(): Boolean {
+        val selection = Intent(FileSelectionContract.ACTION_SELECT)
+            .setPackage(INFINIFOLDER_PACKAGE)
+            .putExtras(request.toBundle())
+            // InfiniFolder completes selection through a ResultReceiver, so
+            // Activity.getCallingPackage() is not reliable in its adapter.
+            .putExtra(FileSelectionContract.EXTRA_REQUESTING_PACKAGE, packageName)
+        waitingForInfiniFolder = true
+        return try {
+            startActivityForResult(selection, REQUEST_INFINIFOLDER)
+            true
+        } catch (error: Exception) {
+            waitingForInfiniFolder = false
+            sourceMessage = "InfiniFolder could not be opened: ${error.message ?: "unavailable"}"
+            false
+        }
     }
 
     private fun isInfiniFolderInstalled(): Boolean = try {
@@ -179,6 +183,12 @@ class FileSelectActivity : Activity() {
                 }
             }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = pad / 3 })
         }
+        if (request.newFileType != null && isInfiniFolderInstalled()) sourceRow.addView(Button(this).apply {
+            text = "InfiniFolder"
+            setOnClickListener {
+                if (!launchInfiniFolderPicker()) showSourceChooser()
+            }
+        }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = pad / 3 })
         sourceRow.addView(Button(this).apply {
             text = "Android files"
             setOnClickListener { launchSafPicker() }
@@ -271,6 +281,10 @@ class FileSelectActivity : Activity() {
                 if (resultCode == RESULT_OK && data != null) {
                     if (data.getBooleanExtra(FileSelectionContract.EXTRA_FALLBACK_TO_SOURCES, false)) {
                         sourceMessage = data.getStringExtra(FileSelectionContract.EXTRA_FAILURE_MESSAGE)
+                        showSourceChooser()
+                    } else if (request.writable &&
+                        !data.getBooleanExtra(FileSelectionContract.EXTRA_RESULT_IS_NEW_FILE, false)) {
+                        sourceMessage = "Choose Android files to open an editable document, or use InfiniFolder to create a new one."
                         showSourceChooser()
                     } else {
                         // InfiniFolder returns relay URIs in ClipData. Retain

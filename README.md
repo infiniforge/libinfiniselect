@@ -88,7 +88,9 @@ an empty placeholder file before the editor has content to save.
 
 When InfiniFolder is unavailable, the source chooser offers **New file in
 folder**. That uses Android's SAF directory picker and returns the same new-file
-result shape with the tree URI and the grants SAF actually issued.
+result shape with the tree URI and the grants SAF actually issued. When the
+request also asks for writable existing documents, the chooser offers both
+InfiniFolder for new-file creation and Android files for editable documents.
 
 Send the generated output back through `InfiniSelect.save`. A caller-owned file
 can be shared as a temporary readable URI without copying it:
