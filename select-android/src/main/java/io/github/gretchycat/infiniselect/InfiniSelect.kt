@@ -10,6 +10,22 @@ import android.database.Cursor
 import android.provider.OpenableColumns
 import java.io.File
 
+/** The document type a caller can create from a selected directory. */
+data class NewFileType(
+    val mimeType: String,
+    /** Optional filename extension without a leading dot. */
+    val extension: String? = null,
+) {
+    init {
+        require(mimeType.isNotBlank() && !mimeType.contains('*')) { "A concrete mimeType is required for a new file" }
+        require(extension == null || extension.trim().removePrefix(".").matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]*"))) {
+            "extension must be a filename extension"
+        }
+    }
+
+    val normalizedExtension: String? get() = extension?.trim()?.removePrefix(".")
+}
+
 /** Request parameters for one viewer's file-open action. */
 data class OpenRequest(
     val clientId: String,
@@ -33,11 +49,14 @@ data class OpenRequest(
     val progressReceiver: ResultReceiver? = null,
     /** Request an editable Android document instead of a temporary read relay. */
     val writable: Boolean = false,
+    /** Offer a "New" action on folders and return the target directory to create this type. */
+    val newFileType: NewFileType? = null,
 ) {
     init {
         require(clientId.matches(Regex("[A-Za-z0-9._-]{1,80}"))) { "clientId must be a short stable identifier" }
         require(mimeTypes.isNotEmpty()) { "At least one MIME type is required" }
         require(!allowRecursiveAudioDirectories || allowMultiple) { "Recursive audio selection requires multiple selection" }
+        require(newFileType == null || !allowMultiple) { "New-file selection is only available for a single-item request" }
     }
 
     internal fun toBundle() = Bundle().apply {
@@ -47,6 +66,10 @@ data class OpenRequest(
         putBoolean("io.github.gretchycat.infiniselect.WRITABLE", writable)
         putBoolean(FileSelectionContract.EXTRA_ALLOW_MULTIPLE, allowMultiple)
         putStringArrayList(FileSelectionContract.EXTRA_SUPPORTED_EXTENSIONS, ArrayList(supportedExtensions))
+        newFileType?.let {
+            putString(FileSelectionContract.EXTRA_NEW_FILE_MIME_TYPE, it.mimeType)
+            it.normalizedExtension?.let { extension -> putString(FileSelectionContract.EXTRA_NEW_FILE_EXTENSION, extension) }
+        }
         putBoolean(FileSelectionContract.EXTRA_HIDE_UNSUPPORTED, hideUnsupported)
         putInt(FileSelectionContract.EXTRA_INITIAL_SCROLL_Y, initialScrollY.coerceAtLeast(0))
         putString(FileSelectionContract.EXTRA_MULTIPLE_DELIVERY, multipleSelectionDelivery.name)
@@ -135,6 +158,11 @@ data class SelectionResult(
     val directoryReference: String? = null,
     /** Current Android access URI for the selected starting directory, if supplied. */
     val directoryContentUri: Uri? = null,
+    val directoryName: String? = null,
+    /** True when the caller should create a blank document instead of opening a selected item. */
+    val isNewFile: Boolean = false,
+    val newFileMimeType: String? = null,
+    val newFileExtension: String? = null,
 ) {
     val primaryUri: Uri? get() = playlistUri ?: items.firstOrNull()?.uri
     /** Stable location identity paired with [directoryContentUri]. */
@@ -167,6 +195,14 @@ object InfiniSelect {
     /** Publish bytes as a short-lived readable source for [save]. */
     fun createDocument(context: Context, name: String, mimeType: String, contents: ByteArray): Uri =
         SelectionDocumentProvider.create(context, name, mimeType, contents)
+
+    /** Publish a readable link to a caller-owned file for [save] without copying the file. */
+    fun createFileDocument(
+        context: Context,
+        file: File,
+        name: String = file.name,
+        mimeType: String = "application/octet-stream",
+    ): Uri = SelectionDocumentProvider.createFileLink(context, file, name, mimeType)
 
     /** True for an expiring selector relay, which is an access handle rather than a saved identity. */
     fun isTemporaryAccessUri(uri: Uri?): Boolean = uri?.isTemporarySelectionUri() == true
@@ -554,7 +590,8 @@ object InfiniSelect {
             ?: intent.getStringArrayListExtra(FileSelectionContract.EXTRA_ITEM_DIRECTORY_REFERENCES).orEmpty()
         val directoryCoverReferences = intent.getStringArrayListExtra(FileSelectionContract.EXTRA_ITEM_DIRECTORY_COVER_AUTHORITATIVE_URIS)
             ?: intent.getStringArrayListExtra(FileSelectionContract.EXTRA_ITEM_DIRECTORY_COVER_REFERENCES).orEmpty()
-        val itemUris = if (uris.isNotEmpty()) uris else buildList {
+        val isNewFile = intent.getBooleanExtra(FileSelectionContract.EXTRA_RESULT_IS_NEW_FILE, false)
+        val itemUris = if (isNewFile) emptyList() else if (uris.isNotEmpty()) uris else buildList {
             intent.data?.let { add(it) }
             intent.clipData?.let { clip ->
                 for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let(::add)
@@ -596,9 +633,20 @@ object InfiniSelect {
         val metadata = intent.getStringExtra(FileSelectionContract.EXTRA_RESULT_METADATA_URI)?.let(Uri::parse)
         val directoryAccessUri = intent.getStringExtra(FileSelectionContract.EXTRA_RESULT_DIRECTORY)
             ?.takeIf(String::isNotBlank)?.let { runCatching { Uri.parse(it) }.getOrNull() }
+            ?: intent.data?.takeIf { isNewFile }
         val directoryReference = stableLocation(context,
             intent.getStringExtra(FileSelectionContract.EXTRA_RESULT_DIRECTORY_REFERENCE), directoryAccessUri)
-        return SelectionResult(items, playlist, metadata, directoryReference, directoryAccessUri)
+        return SelectionResult(
+            items = items,
+            playlistUri = playlist,
+            metadataUri = metadata,
+            directoryReference = directoryReference,
+            directoryContentUri = directoryAccessUri,
+            directoryName = intent.getStringExtra(FileSelectionContract.EXTRA_RESULT_DIRECTORY_NAME),
+            isNewFile = isNewFile,
+            newFileMimeType = intent.getStringExtra(FileSelectionContract.EXTRA_RESULT_NEW_FILE_MIME_TYPE),
+            newFileExtension = intent.getStringExtra(FileSelectionContract.EXTRA_RESULT_NEW_FILE_EXTENSION),
+        )
     }
 
     /** Create a readable JSPF document with durable backend locations where available. */

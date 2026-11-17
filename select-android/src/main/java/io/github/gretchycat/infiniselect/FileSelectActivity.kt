@@ -86,7 +86,7 @@ class FileSelectActivity : Activity() {
 
     private fun startPreferredSource() {
         if (intent.getBooleanExtra("io.github.gretchycat.infiniselect.WRITABLE", false)) {
-            launchSafPicker()
+            if (request.newFileType == null) launchSafPicker() else showSourceChooser()
             return
         }
         if (isInfiniFolderInstalled()) {
@@ -114,9 +114,9 @@ class FileSelectActivity : Activity() {
         true
     } catch (_: PackageManager.NameNotFoundException) { false }
 
-    private fun safInitialDirectory(uri: Uri?): Uri? = uri?.takeUnless {
-        it.authority == "com.infinifolder.documents" && !isInfiniFolderInstalled()
-    }
+    private fun safInitialDirectory(uri: Uri?): Uri? = uri
+        ?.takeIf { it.scheme.equals("content", ignoreCase = true) }
+        ?.takeUnless { it.authority == "com.infinifolder.documents" && !isInfiniFolderInstalled() }
 
     private fun showSourceChooser() {
         inSourceChooser = true
@@ -149,7 +149,11 @@ class FileSelectActivity : Activity() {
             textSize = 20f
             setTypeface(typeface, Typeface.BOLD)
         })
-        labels.addView(TextView(this).apply { text = "Choose a source to open a file"; textSize = 14f })
+        labels.addView(TextView(this).apply {
+            text = if (request.newFileType == null) "Choose a source to open a file"
+                else "Open a file or create a new one"
+            textSize = 14f
+        })
         identity.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
         page.addView(identity)
         sourceMessage?.let { message ->
@@ -178,6 +182,10 @@ class FileSelectActivity : Activity() {
         sourceRow.addView(Button(this).apply {
             text = "Android files"
             setOnClickListener { launchSafPicker() }
+        }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = pad / 3 })
+        if (request.newFileType != null) sourceRow.addView(Button(this).apply {
+            text = "New file in folder"
+            setOnClickListener { launchNewFileDirectoryPicker() }
         }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = pad / 3 })
         sourceScroll.addView(sourceRow)
         page.addView(sourceScroll)
@@ -230,6 +238,17 @@ class FileSelectActivity : Activity() {
             .onFailure { showMessage("Android's file picker is unavailable: ${it.message ?: "no picker app"}") }
     }
 
+    private fun launchNewFileDirectoryPicker() {
+        if (request.newFileType == null) return
+        val picker = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+            safInitialDirectory(request.initialDirectory)?.let { putExtra(DocumentsContract.EXTRA_INITIAL_URI, it) }
+        }
+        runCatching { startActivityForResult(picker, REQUEST_NEW_FILE_DIRECTORY) }
+            .onFailure { showMessage("Android's folder picker is unavailable: ${it.message ?: "no picker app"}") }
+    }
+
     private fun launchDefaultFolderPicker() {
         val picker = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
@@ -269,6 +288,36 @@ class FileSelectActivity : Activity() {
             } else if (inSourceChooser) {
                 showSourceChooser()
             } else finishWithCancel()
+            REQUEST_NEW_FILE_DIRECTORY -> {
+                val type = request.newFileType
+                val resultData = data
+                val directory = resultData?.data
+                if (resultCode != RESULT_OK || resultData == null || directory == null || type == null) {
+                    if (inSourceChooser) showSourceChooser() else finishWithCancel()
+                    return
+                }
+                retainGrant(resultData)
+                InfiniSelect.setDefaultDirectory(this, request.clientId, directory)
+                val grantFlags = resultData.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+                val result = Intent().setData(directory).apply {
+                    addFlags(grantFlags)
+                    clipData = android.content.ClipData.newRawUri("New file directory", directory)
+                    putExtra(FileSelectionContract.EXTRA_RESULT_IS_NEW_FILE, true)
+                    putExtra(FileSelectionContract.EXTRA_RESULT_DIRECTORY, directory.toString())
+                    putExtra(FileSelectionContract.EXTRA_RESULT_DIRECTORY_REFERENCE, directory.toString())
+                    putExtra(FileSelectionContract.EXTRA_RESULT_DIRECTORY_NAME,
+                        directory.lastPathSegment?.substringAfterLast(':')?.substringAfterLast('/') ?: "")
+                    putExtra(FileSelectionContract.EXTRA_RESULT_NEW_FILE_MIME_TYPE, type.mimeType)
+                    type.normalizedExtension?.let {
+                        putExtra(FileSelectionContract.EXTRA_RESULT_NEW_FILE_EXTENSION, it)
+                    }
+                    putExtra(FileSelectionContract.EXTRA_RESULT_SCROLL_Y, 0)
+                }
+                setResult(RESULT_OK, result)
+                finish()
+            }
             REQUEST_DEFAULT_DIRECTORY -> {
                 if (resultCode == RESULT_OK) {
                     data?.data?.let { uri ->
@@ -397,6 +446,14 @@ class FileSelectActivity : Activity() {
 
     private fun returnToCaller(result: Int, data: Intent) {
         if (result != RESULT_OK) { setResult(result, data); finish(); return }
+        if (data.getBooleanExtra(FileSelectionContract.EXTRA_RESULT_IS_NEW_FILE, false)) {
+            if (request.newFileType == null) { finishWithCancel(); return }
+            rememberDirectoryFromResult(request.clientId, data)
+            retainGrant(data)
+            setResult(RESULT_OK, data)
+            finish()
+            return
+        }
         val items = selectedItems(data)
         if (items.isEmpty()) { finishWithCancel(); return }
 
@@ -585,6 +642,9 @@ class FileSelectActivity : Activity() {
             allowMultiple = getBooleanExtra(FileSelectionContract.EXTRA_ALLOW_MULTIPLE, false),
             initialDirectory = getParcelableExtraCompat(FileSelectionContract.EXTRA_INITIAL_DIRECTORY),
             supportedExtensions = getStringArrayListExtra(FileSelectionContract.EXTRA_SUPPORTED_EXTENSIONS).orEmpty(),
+            newFileType = getStringExtra(FileSelectionContract.EXTRA_NEW_FILE_MIME_TYPE)?.let {
+                NewFileType(it, getStringExtra(FileSelectionContract.EXTRA_NEW_FILE_EXTENSION))
+            },
             hideUnsupported = getBooleanExtra(FileSelectionContract.EXTRA_HIDE_UNSUPPORTED, false),
             initialScrollY = getIntExtra(FileSelectionContract.EXTRA_INITIAL_SCROLL_Y, 0).coerceAtLeast(0),
             multipleSelectionDelivery = runCatching {
@@ -632,5 +692,6 @@ class FileSelectActivity : Activity() {
         private const val REQUEST_BACKEND = 4104
         private const val REQUEST_INFINIFOLDER_SAVE = 4105
         private const val REQUEST_SAF_SAVE = 4106
+        private const val REQUEST_NEW_FILE_DIRECTORY = 4107
     }
 }
