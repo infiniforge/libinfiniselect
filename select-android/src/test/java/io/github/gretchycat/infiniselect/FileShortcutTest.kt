@@ -32,14 +32,39 @@ class FileShortcutTest {
     }
 
     @Test
-    fun rejectsDirectoryLinksUnknownVersionsAndTemporaryRelays() {
+    fun rejectsUnknownVersionsAndTemporaryRelays() {
         for (text in
             listOf(
                 """{"version":2,"targetUri":"file:///game"}""",
-                """{"version":1,"targetUri":"file:///game","targetIsDirectory":true}""",
                 """{"version":1,"targetUri":"content://com.infinifolder.selection/temporary"}""",
             )) {
             assertThrows(IllegalArgumentException::class.java) { FileShortcut.decode(text) }
+        }
+    }
+
+    @Test
+    fun networkDirectoryTargetsRoundTripWithoutBeingTreatedAsGameFiles() {
+        val json =
+            """{"version":1,"targetUri":"smb://saved-connection/roms","displayNameOverride":"Network library","targetIsDirectory":true,"targetMimeType":"vnd.android.document/directory"}"""
+        val link = FileShortcut.decode(json)
+        assertTrue(link.targetIsDirectory)
+        assertEquals("smb://saved-connection/roms", link.targetUri)
+        assertEquals(link, FileShortcut.decode(link.encode()))
+    }
+
+    @Test
+    fun linksAcceptOpaqueAndCustomUrisWithoutASchemeWhitelist() {
+        for (uri in
+            listOf(
+                "https://example.com/collection?q=1#part",
+                "mailto:user@example.com",
+                "tel:+15551234567",
+                "custom-app:resource/42",
+                "archive://source/entry",
+                "content://provider/document/123",
+            )) {
+            val link = FileShortcut(uri, "Link", createdAtMillis = 42)
+            assertEquals(uri, FileShortcut.decode(link.encode()).targetUri)
         }
     }
 

@@ -1,6 +1,6 @@
 # Embedding the complete InfiniFolder browser
 
-InfiniSelect 0.2.2 is a gateway to InfiniFolder's complete existing browser. It does
+InfiniSelect 0.2.3 is a gateway to InfiniFolder's complete existing browser. It does
 not implement file listing UI, cards, breadcrumbs, directory history/navigation,
 sorting, gestures, thumbnails or file menus. Those views and behavior remain in
 InfiniFolder. Its floating selector and embedded sessions use the same
@@ -59,6 +59,13 @@ forwards Back when Folder's last navigation event says a parent is available;
 files so hosts such as Play can read their own extension metadata; default
 selection follows links using Folder's existing resolver.
 
+Folder resolves shortcut targets before deciding what to do, regardless of where
+an .iflink is stored. Directories and browsable archives navigate inside Folder;
+other URI targets go through Folder's existing URI dispatcher. For regular-file
+targets only, `selectLinkDocuments=true` returns the original shortcut so a
+caller can preserve its own optional metadata. This option does not turn folder,
+archive, web or custom URI links into file-import requests.
+
 `fileActions: List<SelectionAction>` supplies long-press labels/IDs to Folder,
 which renders the menu inside its hosted view. `onFileAction(id, item)` dispatches
 the caller's choice; the caller owns Favorites/metadata side effects. A selection
@@ -90,7 +97,7 @@ only the current directory and whether Back is available.
 
 ## File links
 
-`FileShortcut` reads/writes version-1 `.iflink` JSON with `targetUri`, `displayNameOverride`, `targetMimeType`, `targetIsDirectory=false`, `createdAtMillis`, plus optional `infiniPlaySystem`. Documents are bounded to 128 KiB. Temporary Folder targets, directory links and unknown versions are rejected. `writeTo(directory)` atomically creates a SHA-256-named file or reuses an existing same-identity link, including user-named links. Client apps should use `ShortcutCollections` for shared directories; only the storage-owning process writes those files. Removal never deletes the target.
+`FileShortcut` reads/writes version-1 `.iflink` JSON with `targetUri`, `displayNameOverride`, `targetMimeType`, `targetIsDirectory`, `createdAtMillis`, plus optional `infiniPlaySystem`. Documents are bounded to 128 KiB. Directory targets are preserved, and valid absolute URIs have no scheme whitelist. Temporary Folder access relays and unknown versions are rejected. App-specific game validation belongs in Play, not in this model. `writeTo(directory)` atomically creates a SHA-256-named file or reuses an existing same-identity link, including user-named links. Client apps should use `ShortcutCollections` for shared directories; only the storage-owning process writes those files. Removal never deletes the target.
 
 ## Validation
 

@@ -13,6 +13,7 @@ data class FileShortcut(
     val mimeType: String = "application/octet-stream",
     val system: String? = null,
     val createdAtMillis: Long = System.currentTimeMillis(),
+    val targetIsDirectory: Boolean = false,
 ) {
     init {
         require(
@@ -31,7 +32,7 @@ data class FileShortcut(
                 put("targetUri", targetUri)
                 put("displayNameOverride", displayName)
                 put("targetMimeType", mimeType)
-                put("targetIsDirectory", false)
+                put("targetIsDirectory", targetIsDirectory)
                 put("createdAtMillis", createdAtMillis)
                 system?.let { put("infiniPlaySystem", it) }
             }
@@ -90,9 +91,7 @@ data class FileShortcut(
         fun decode(text: String): FileShortcut {
             require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "Link is too large" }
             val json = JSONObject(text)
-            require(json.optInt("version", 1) == 1 && !json.optBoolean("targetIsDirectory")) {
-                "Unsupported file link"
-            }
+            require(json.optInt("version", 1) == 1) { "Unsupported file link" }
             val target = json.getString("targetUri")
             require(target.isNotBlank() && !isTemporarySelectionReference(target)) {
                 "Link needs a durable target"
@@ -105,6 +104,7 @@ data class FileShortcut(
                 json.optString("targetMimeType", "application/octet-stream"),
                 json.optString("infiniPlaySystem").takeIf { it.isNotBlank() },
                 json.optLong("createdAtMillis", 0),
+                json.optBoolean("targetIsDirectory", false),
             )
         }
 
