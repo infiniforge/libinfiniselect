@@ -775,7 +775,7 @@ internal fun selectCurrentAccessLocation(
 private fun Uri.isTemporarySelectionUri(): Boolean =
     isTemporarySelectionReference(toString())
 
-private fun isTemporarySelectionReference(reference: String): Boolean {
+internal fun isTemporarySelectionReference(reference: String): Boolean {
     if (!reference.startsWith("content://", true)) return false
     val authority = reference.substringAfter("://").substringBefore('/').substringBefore('?').substringBefore('#')
     return authority.endsWith(".selection", true)

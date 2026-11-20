@@ -11,3 +11,5 @@ Reusable Android file open/save selection and resource-resolution client APIs.
 ## API, architecture, and implementation documentation
 
 - [README.md](../README.md) — public API overview, build instructions, and supported boundary.
+
+- [Embedded browser and .iflink API](embedded-browser.md).
