@@ -45,6 +45,7 @@ data class FileShortcut(
             .orEmpty()
             .firstOrNull { file ->
                 file.isFile &&
+                    !java.nio.file.Files.isSymbolicLink(file.toPath()) &&
                     file.extension.equals("iflink", true) &&
                     file.length() <= MAX_BYTES &&
                     runCatching {

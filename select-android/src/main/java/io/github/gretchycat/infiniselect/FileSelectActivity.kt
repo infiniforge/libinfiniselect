@@ -658,6 +658,7 @@ class FileSelectActivity : Activity() {
             allowMultiple = getBooleanExtra(FileSelectionContract.EXTRA_ALLOW_MULTIPLE, false),
             initialDirectory = getParcelableExtraCompat(FileSelectionContract.EXTRA_INITIAL_DIRECTORY),
             supportedExtensions = getStringArrayListExtra(FileSelectionContract.EXTRA_SUPPORTED_EXTENSIONS).orEmpty(),
+            preferredViewMode = FileViewMode.fromWire(getStringExtra(FileSelectionContract.EXTRA_PREFERRED_VIEW_MODE)),
             fileActions = SelectionAction.fromWire(getStringArrayListExtra(FileSelectionContract.EXTRA_FILE_ACTION_IDS).orEmpty(),
                 getStringArrayListExtra(FileSelectionContract.EXTRA_FILE_ACTION_LABELS).orEmpty()),
             newFileType = getStringExtra(FileSelectionContract.EXTRA_NEW_FILE_MIME_TYPE)?.let {

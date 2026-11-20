@@ -5,7 +5,7 @@ flow without depending on InfiniFolder's UI or storage implementation.
 
 ## Embedded browser
 
-Version 0.1.1 adds `EmbeddedFileBrowser` for local files, granted SAF trees and optional InfiniFolder sources, with persistent list/icon views and breadcrumbs. `FileShortcut` reads/writes compatible `.iflink` documents and deduplicates by authoritative identity. See [embedded browser API and limits](docs/embedded-browser.md).
+Version 0.1.2 adds relayed JSON directory listings and scoped shortcut collection writes, without broad storage permissions in clients. It also supports `preferredViewMode = FileViewMode.LIST` or `ICON` in floating requests and embedded constructors. See [relay API](docs/relay-storage.md). The 0.1.1 release introduced `EmbeddedFileBrowser` for local files, granted SAF trees and optional InfiniFolder sources, with persistent list/icon views and breadcrumbs. `FileShortcut` reads/writes compatible `.iflink` documents and deduplicates by authoritative identity. See [embedded browser API and limits](docs/embedded-browser.md).
 
 ## Use
 

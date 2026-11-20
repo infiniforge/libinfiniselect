@@ -16,7 +16,9 @@ import java.util.concurrent.Executors
  * Embeddable source browser. Folder storage is accessed only through its grant-checked
  * DocumentsProvider.
  */
-class EmbeddedFileBrowser(context: Context) : LinearLayout(context) {
+class EmbeddedFileBrowser
+@JvmOverloads
+constructor(context: Context, preferredViewMode: FileViewMode? = null) : LinearLayout(context) {
     var sortByModified: Boolean = false
     var onSelected: (SelectionItem) -> Unit = {}
     var fileActions: (SelectionItem) -> List<SelectionAction> = { emptyList() }
@@ -56,7 +58,8 @@ class EmbeddedFileBrowser(context: Context) : LinearLayout(context) {
             navigation.visibility = if (value) VISIBLE else GONE
         }
 
-    var iconMode: Boolean = prefs.getBoolean("icons", false)
+    var iconMode: Boolean =
+        FileViewMode.initialIconMode(preferredViewMode, prefs.getBoolean("icons", false))
         set(value) {
             field = value
             prefs.edit().putBoolean("icons", value).apply()
@@ -71,6 +74,7 @@ class EmbeddedFileBrowser(context: Context) : LinearLayout(context) {
         val size: Long?,
         val label: String = name,
         val modified: Long = 0,
+        val relayed: Boolean = false,
     )
 
     init {
@@ -162,43 +166,29 @@ class EmbeddedFileBrowser(context: Context) : LinearLayout(context) {
         }
     }
 
+    private fun relay(directory: Uri?): List<Entry> {
+        val token = generation
+        val listing = FolderStorage.list(context, directory)
+        if (listing.loading) main.postDelayed({ if (token == generation) refresh() }, 1000)
+        return listing.entries.map {
+            Entry(it.uri, it.name, it.directory, it.mime, it.size, it.label, it.modified, true)
+        }
+    }
+
+    private fun privateLocation(uri: Uri): Boolean =
+        uri.scheme == "file" &&
+            runCatching {
+                    val path = File(uri.path!!).canonicalPath
+                    path.startsWith(context.filesDir.canonicalPath + "/") ||
+                        path.startsWith(context.cacheDir.canonicalPath + "/")
+                }
+                .getOrDefault(false)
+
     private fun roots(): List<Entry> {
-        val out =
-            mutableListOf(
-                Entry(
-                    Uri.fromFile(Environment.getExternalStorageDirectory()),
-                    "Internal storage",
-                    true,
-                    DocumentsContract.Document.MIME_TYPE_DIR,
-                    null,
-                )
-            )
-        val permissions =
-            context.contentResolver.persistedUriPermissions.filter {
-                it.isReadPermission && DocumentsContract.isTreeUri(it.uri)
-            }
-        val folder =
-            permissions.firstOrNull {
-                it.uri.authority == FileSelectionContract.INFINIFOLDER_DOCUMENTS_AUTHORITY &&
-                    DocumentsContract.getTreeDocumentId(it.uri) == "root"
-            }
-        if (folder != null) out.addAll(list(document(folder.uri)))
-        else if (
-            context.packageManager.resolveContentProvider(
-                FileSelectionContract.INFINIFOLDER_DOCUMENTS_AUTHORITY,
-                0,
-            ) != null
-        )
-            out +=
-                Entry(
-                    Uri.parse("infiniselect://folder-access"),
-                    "InfiniFolder sources…",
-                    true,
-                    "",
-                    null,
-                )
-        permissions
-            .filter { it.uri != folder?.uri }
+        val out = mutableListOf<Entry>()
+        if (FolderStorage.available(context)) out.addAll(relay(null))
+        context.contentResolver.persistedUriPermissions
+            .filter { it.isReadPermission && DocumentsContract.isTreeUri(it.uri) }
             .forEach {
                 out +=
                     Entry(
@@ -218,6 +208,8 @@ class EmbeddedFileBrowser(context: Context) : LinearLayout(context) {
         DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
 
     private fun list(directory: Uri): List<Entry> {
+        if (!privateLocation(directory) && FolderStorage.available(context))
+            return sorted(relay(directory))
         val result =
             if (directory.scheme == "file") {
                 val file = File(requireNotNull(directory.path))
@@ -280,6 +272,10 @@ class EmbeddedFileBrowser(context: Context) : LinearLayout(context) {
                 } ?: error("Storage provider returned no directory listing")
                 rows
             }
+        return sorted(result)
+    }
+
+    private fun sorted(result: List<Entry>): List<Entry> {
         val files =
             if (sortByModified)
                 compareByDescending<Entry> { it.modified }.thenBy { it.label.lowercase() }
@@ -317,7 +313,12 @@ class EmbeddedFileBrowser(context: Context) : LinearLayout(context) {
                         "infiniselect://open" -> onRequestOpen()
                         else ->
                             if (entry.directory) {
-                                if (entry.uri.scheme == "file" && !canBrowseLocal())
+                                if (
+                                    entry.uri.scheme == "file" &&
+                                        !entry.relayed &&
+                                        !privateLocation(entry.uri) &&
+                                        !canBrowseLocal()
+                                )
                                     onRequestLocalAccess()
                                 else {
                                     current = entry.uri
@@ -351,15 +352,26 @@ class EmbeddedFileBrowser(context: Context) : LinearLayout(context) {
         val token = generation
         executor.execute {
             val result = runCatching {
-                val access =
-                    if (entry.uri.scheme == "file")
-                        InfiniSelect.createFileDocument(
+                val source =
+                    if (entry.relayed)
+                        InfiniSelect.requireSource(
                             context,
-                            File(entry.uri.path!!),
+                            entry.uri.toString(),
                             entry.name,
                             entry.mime,
+                            entry.size,
                         )
-                    else entry.uri
+                    else null
+                val access =
+                    source?.contentUri
+                        ?: if (entry.uri.scheme == "file")
+                            InfiniSelect.createFileDocument(
+                                context,
+                                File(entry.uri.path!!),
+                                entry.name,
+                                entry.mime,
+                            )
+                        else entry.uri
                 val identity =
                     InfiniSelect.authoritativeUri(context, entry.uri.toString()) ?: entry.uri
                 SelectionItem(

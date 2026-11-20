@@ -52,6 +52,7 @@ data class OpenRequest(
     /** Offer a "New" action on folders and return the target directory to create this type. */
     val newFileType: NewFileType? = null,
     val fileActions: List<SelectionAction> = emptyList(),
+    val preferredViewMode: FileViewMode? = null,
 ) {
     init {
         require(clientId.matches(Regex("[A-Za-z0-9._-]{1,80}"))) { "clientId must be a short stable identifier" }
@@ -61,6 +62,7 @@ data class OpenRequest(
     }
 
     internal fun toBundle() = Bundle().apply {
+        preferredViewMode?.let { putString(FileSelectionContract.EXTRA_PREFERRED_VIEW_MODE,it.name) }
         SelectionAction.validate(fileActions)
         putStringArrayList(FileSelectionContract.EXTRA_FILE_ACTION_IDS,ArrayList(fileActions.map { it.id }))
         putStringArrayList(FileSelectionContract.EXTRA_FILE_ACTION_LABELS,ArrayList(fileActions.map { it.label }))
@@ -655,7 +657,9 @@ object InfiniSelect {
         )
     }
 
-    /** Create a readable JSPF document with durable backend locations where available. */
+    /** Create a readable JSPF document with durable backend locations where available.
+     * TODO: move playlist generation to InfiniMedia using the directory-listing API; see docs/TODO.md.
+     */
     fun createJspfPlaylist(context: Context, items: List<SelectionItem>, title: String = "Selection.jspf"): Uri {
         require(items.isNotEmpty()) { "A playlist needs at least one item" }
         val tracks = org.json.JSONArray()

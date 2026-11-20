@@ -13,3 +13,7 @@ Reusable Android file open/save selection and resource-resolution client APIs.
 - [README.md](../README.md) — public API overview, build instructions, and supported boundary.
 
 - [Embedded browser and .iflink API](embedded-browser.md).
+
+- [Planned playlist ownership migration](TODO.md).
+
+- [Relayed JSON directory listings and shortcut collections](relay-storage.md).

@@ -1,34 +1,30 @@
 # Embedded browser and file links
 
-Version 0.1.1 adds `EmbeddedFileBrowser(context)`, a reusable Android View for a consuming app's layout. There is no dependency on InfiniFolder application source. It lists directories asynchronously and delivers UI-thread callbacks. The host owns permissions, activity results and file actions.
+`EmbeddedFileBrowser(context, preferredViewMode = FileViewMode.LIST)` is a reusable Android View. The optional preference accepts LIST or ICON; null uses the saved mode. It initializes this instance without preventing the user from toggling. `OpenRequest(preferredViewMode = FileViewMode.ICON, ...)` passes the same preference to the floating selector. Unknown wire values are ignored. User toggles persist the mode for requests without an override.
 
 ```kotlin
-val browser = EmbeddedFileBrowser(activity).apply {
+val browser = EmbeddedFileBrowser(activity, FileViewMode.LIST).apply {
     onSelected = { item -> openDocument(item) }
-    fileActions = { item -> listOf(SelectionAction("add_favorite", "Add to favorites")) }
-    onFileAction = { actionId, item -> handleAppAction(actionId, item) }
+    fileActions = { listOf(SelectionAction("add_favorite", "Add to favorites")) }
+    onFileAction = { id, item -> handleAppAction(id, item) }
     onRequestTree = { initial -> StorageAccess.selectDirectory(activity, 42, initial) }
-    onRequestLocalAccess = { requestStoragePermission() }
     onRequestOpen = { openNormalInfiniSelectPicker() }
     onError = { message -> showError(message) }
 }
 container.addView(browser)
-browser.open() // Virtual root
-// Or browser.open(Uri.fromFile(directory), "Recents")
+browser.open() // Virtual root; or open(authoritativeDirectory, label)
 ```
 
-Virtual root lists internal shared storage, persisted SAF trees and optional InfiniFolder sources. First use of Folder sources asks for an Android tree grant at `com.infinifolder.documents` / `root`. After the host persists the actually granted result with `StorageAccess.persist` and reopens the browser, Folder's local/remote/container sources appear inline. Archive navigation follows its provider's directory representation. No credentials, backend classes or private files are copied from Folder. Without Folder, local files, granted SAF trees and Android file selection remain available.
+The browser requests [paged JSON directory listings](relay-storage.md) from InfiniFolder and lazily obtains a read relay for selected files. Folder owns local/remote/archive access; clients need no broad storage permission or Folder tree grant. No application implementation classes or credentials are copied. Without Folder, granted SAF directories, Android file selection and app-owned private link directories remain usable. The host owns ordinary Android picker results/grants and application-specific actions. Basic file/folder symbols are used; this is not Folder's full thumbnail/theme or file-operation UI.
 
-Tree browsing requires an actual tree grant. Hosts may supply `canBrowseLocal` for their Android shared-storage access policy. Local selections pair temporary `createFileDocument` access with durable file identity; provider selections pair their tree-granted access URI with canonical identity. Errors remain visible. Detaching the View stops its worker and content observer. Resource-provider notifications refresh listings. This component uses standard file/folder symbols, not Folder's full theme/thumbnail or file-operation UI.
+The breadcrumb bar contains Back, path and the list/icon toggle. `breadcrumbsEnabled` hides/shows the whole bar; `iconMode` switches layout at runtime. Both user preferences persist per consumer. `goBack()` reports whether a parent was opened; `open(directory, label)` sets a navigation boundary. Listings run on a worker, callbacks run on the UI thread, loading backends are refreshed and detach stops the worker/observer.
 
-The breadcrumb bar contains Back, path and a persistent list/icon toggle. `breadcrumbsEnabled` hides/shows the entire bar; `iconMode` changes layout without changing location. Both preferences are private to the consumer. `goBack()` reports whether a parent was opened. `open(directory, label)` sets a navigation boundary.
+## File links
 
-`FileShortcut` reads/writes compatible version-1 `.iflink` JSON with `targetUri`, `displayNameOverride`, `targetMimeType`, `targetIsDirectory=false`, `createdAtMillis` and optional `infiniPlaySystem`. It rejects temporary Folder targets, directory links, unknown versions and documents larger than 128 KiB. `writeTo(directory)` atomically creates a link with a stable SHA-256 name or reuses an existing same-identity link, including user-named links. Removing a link never removes the target.
-
-Standalone AAR/JVM checks cover interoperability, malformed/oversized links, bounded reads, repeated writes and separate recent/favorite links. Touch UI, URI grants, provider notifications and accessibility require device acceptance.
+`FileShortcut` reads/writes version-1 `.iflink` JSON with `targetUri`, `displayNameOverride`, `targetMimeType`, `targetIsDirectory=false`, `createdAtMillis`, plus optional `infiniPlaySystem`. Documents are bounded to 128 KiB. Temporary Folder targets, directory links and unknown versions are rejected. `writeTo(directory)` atomically creates a SHA-256-named file or reuses an existing same-identity link, including user-named links. Client apps should use `ShortcutCollections` for shared directories; only the storage-owning process writes those files. Removal never deletes the target.
 
 ## Caller-owned long-press actions
 
-`fileActions: (SelectionItem) -> List<SelectionAction>` supplies labels/IDs dynamically for embedded file menus. The browser displays Open plus those actions; `onFileAction(id, item)` returns control to the caller. Favorites, metadata lookup and artwork services belong to the caller, not this library. The older `onFileMenu` whole-menu callback remains available when the action list is empty.
+`fileActions: (SelectionItem) -> List<SelectionAction>` supplies embedded menu labels/IDs. The View displays Open and those actions; `onFileAction(id, item)` returns control. Favorites, metadata/artwork services and other side effects belong to the caller. The older whole-menu `onFileMenu` callback remains available when no actions are supplied.
 
-For a floating single-file selector, set `OpenRequest.fileActions`. Updated InfiniFolder displays those labels on file long press and returns the usual grant-aware selection plus `SelectionResult.actionId`. Handle the action instead of opening the file. IDs/labels travel as bounded contract arrays; only a requested ID is forwarded. Selecting an action closes the picker. Existing folder New/multi-selection actions are preserved; custom file actions apply to single-file read selection. Android's system picker and older Folder builds do not expose this menu and return normal selections. No arbitrary callback code or game-specific operation runs inside the provider.
+For floating single-file read selection, set `OpenRequest.fileActions`. Updated Folder returns normal file access/identity and `SelectionResult.actionId` after a long-press action. Handle the action instead of opening the file. Only requested action IDs are forwarded. Actions close the picker; folder New and multi-selection behavior is preserved. Android's picker and older Folder builds return ordinary selections without this menu.
