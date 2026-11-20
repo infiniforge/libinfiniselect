@@ -54,4 +54,23 @@ class DirectoryListingEntryTest {
             DirectoryListingEntry.decodePage(relative)
         }
     }
+
+    @Test
+    fun androidResourcePathsStayOpaqueAcrossDirectoryJson() {
+        val uri = "sftp://connection/Console ROMS/100% fun [β] (1991).lnx"
+        val row =
+            DirectoryListingEntry(
+                uri,
+                "100% fun [β] (1991).lnx",
+                "Game",
+                "application/octet-stream",
+                false,
+                123,
+                0,
+            )
+        assertEquals(
+            listOf(row),
+            DirectoryListingEntry.decodePage(JSONArray().put(row.toJson()).toString()),
+        )
+    }
 }

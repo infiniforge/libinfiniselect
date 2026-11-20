@@ -18,7 +18,7 @@ data class FileShortcut(
     init {
         require(
             targetUri.isNotBlank() &&
-                java.net.URI(targetUri).isAbsolute &&
+                hasAbsoluteResourceScheme(targetUri) &&
                 !isTemporarySelectionReference(targetUri)
         ) {
             "Link needs a durable target"

@@ -1,6 +1,6 @@
 # Embedding the complete InfiniFolder browser
 
-InfiniSelect 0.2.3 is a gateway to InfiniFolder's complete existing browser. It does
+InfiniSelect 0.2.4 is a gateway to InfiniFolder's complete existing browser. It does
 not implement file listing UI, cards, breadcrumbs, directory history/navigation,
 sorting, gestures, thumbnails or file menus. Those views and behavior remain in
 InfiniFolder. Its floating selector and embedded sessions use the same
@@ -97,7 +97,7 @@ only the current directory and whether Back is available.
 
 ## File links
 
-`FileShortcut` reads/writes version-1 `.iflink` JSON with `targetUri`, `displayNameOverride`, `targetMimeType`, `targetIsDirectory`, `createdAtMillis`, plus optional `infiniPlaySystem`. Documents are bounded to 128 KiB. Directory targets are preserved, and valid absolute URIs have no scheme whitelist. Temporary Folder access relays and unknown versions are rejected. App-specific game validation belongs in Play, not in this model. `writeTo(directory)` atomically creates a SHA-256-named file or reuses an existing same-identity link, including user-named links. Client apps should use `ShortcutCollections` for shared directories; only the storage-owning process writes those files. Removal never deletes the target.
+`FileShortcut` reads/writes version-1 `.iflink` JSON with `targetUri`, `displayNameOverride`, `targetMimeType`, `targetIsDirectory`, `createdAtMillis`, plus optional `infiniPlaySystem`. Documents are bounded to 128 KiB. Directory targets are preserved, and absolute resource URIs have no scheme whitelist. Validation checks the absolute scheme without parsing the provider-owned path through java.net.URI: raw spaces, Unicode, literal percent signs and already encoded text are preserved byte-for-byte in .iflink JSON and directory listings. Identities are never trimmed, decoded or re-encoded by these data models. Temporary Folder access relays and unknown versions are rejected. App-specific game validation belongs in Play, not in this model. `writeTo(directory)` atomically creates a SHA-256-named file or reuses an existing same-identity link, including user-named links. Client apps should use `ShortcutCollections` for shared directories; only the storage-owning process writes those files. Removal never deletes the target.
 
 ## Validation
 

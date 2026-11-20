@@ -34,7 +34,7 @@ data class DirectoryListingEntry(
             return (0 until rows.length()).map { index ->
                 val row = rows.getJSONObject(index)
                 val uri = row.getString("uri")
-                require(java.net.URI(uri).isAbsolute) {
+                require(hasAbsoluteResourceScheme(uri)) {
                     "Directory entry needs an authoritative URI"
                 }
                 val name = row.getString("name")

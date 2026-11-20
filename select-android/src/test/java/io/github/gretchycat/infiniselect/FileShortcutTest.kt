@@ -101,4 +101,66 @@ class FileShortcutTest {
             directory.deleteRecursively()
         }
     }
+
+    @Test
+    fun androidResourcePathsWithSpacesRoundTripWithoutReencoding() {
+        val base =
+            "sftp://00000000-0000-0000-0000-000000000001/srv/1TB/MultiMedia/Emulation/ROMS/Console/Atari/atarilynx/LynxRen/"
+        for (name in listOf("Awesome Golf (1991).lnx", "100% fun [β].lnx", "日本語 game.lnx")) {
+            val target = base + name
+            val link = FileShortcut(target, name, createdAtMillis = 42)
+            assertEquals(target, FileShortcut.decode(link.encode()).targetUri)
+            assertEquals(target, JSONObject(link.encode()).getString("targetUri"))
+        }
+    }
+
+    @Test
+    fun escapedAndUnescapedResourceIdentitiesKeepTheirOriginalSpelling() {
+        for (target in
+            listOf(
+                "sftp://connection/games/Awesome Golf.lnx",
+                "sftp://connection/games/Awesome%20Golf.lnx",
+                "sftp://connection/games/Literal%2520Name.lnx",
+            )) {
+            assertEquals(
+                target,
+                FileShortcut.decode(FileShortcut(target, "Game").encode()).targetUri,
+            )
+        }
+    }
+
+    @Test
+    fun linksWithSpacesReuseExistingUserNamedShortcuts() {
+        val directory = java.nio.file.Files.createTempDirectory("iflink-spaces").toFile()
+        try {
+            val link =
+                FileShortcut(
+                    "sftp://connection/Console ROMS/Awesome Golf (1991).lnx",
+                    "Awesome Golf (1991).lnx",
+                )
+            val first = link.writeTo(directory)
+            val renamed = java.io.File(directory, "My game.iflink")
+            assertTrue(first.renameTo(renamed))
+            assertEquals(renamed, link.writeTo(directory))
+            assertEquals(link, FileShortcut.decode(renamed.readText()))
+            assertEquals(1, directory.listFiles()!!.size)
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun relativeResourcesAndInvalidSchemesStillFail() {
+        for (target in
+            listOf(
+                "",
+                "../Awesome Golf.lnx",
+                "/storage/game.lnx",
+                ":game",
+                "1bad:game",
+                "bad scheme:game",
+            )) {
+            assertThrows(IllegalArgumentException::class.java) { FileShortcut(target, "Game") }
+        }
+    }
 }
