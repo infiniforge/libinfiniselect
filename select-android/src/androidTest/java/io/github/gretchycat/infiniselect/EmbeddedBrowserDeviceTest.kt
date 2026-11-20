@@ -138,6 +138,9 @@ class EmbeddedBrowserDeviceTest {
                 val parent = host.browser.parent as android.view.ViewGroup
                 parent.removeView(host.browser)
                 parent.addView(host.browser)
+                // Play calls refresh when its launcher returns from the emulator. That must
+                // reconnect if the existing host surface lost its Folder session.
+                host.browser.refresh()
             }
             await("Folder surface was not re-created") { host.readyCount > readyBefore }
             await("Folder did not restore its own browser state") {

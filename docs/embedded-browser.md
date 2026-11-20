@@ -1,6 +1,6 @@
 # Embedding the complete InfiniFolder browser
 
-InfiniSelect 0.2.4 is a gateway to InfiniFolder's complete existing browser. It does
+InfiniSelect 0.2.5 is a gateway to InfiniFolder's complete existing browser. It does
 not implement file listing UI, cards, breadcrumbs, directory history/navigation,
 sorting, gestures, thumbnails or file menus. Those views and behavior remain in
 InfiniFolder. Its floating selector and embedded sessions use the same
@@ -21,8 +21,11 @@ browser.open() // Folder's actual Virtual root, including its breadcrumb trail
 
 On Android 11/API 30 and newer, Folder renders and handles input in its own
 process through Android's SurfaceControlViewHost. The gateway hosts that surface
-and forwards open, resize, back, refresh and configuration commands. A retained
-unstable ContentProviderClient keeps the provider connection alive without making
+and forwards open, resize, back, refresh and configuration commands. Calling
+`refresh()` after the host returns to the foreground reconnects when the surface
+is still attached but its Folder session has ended; a failed refresh gets one
+reconnect attempt before reporting the error. A retained unstable
+ContentProviderClient keeps the provider connection alive without making
 a Folder crash terminate the client; a server Binder death callback exposes a
 fallback. Host detach/surface destruction closes the session. Folder returns an opaque, validated trail/scroll snapshot that the gateway passes back on reattach; an explicit open discards the prior snapshot. Only Folder interprets this state. `onReady` reports attachment of the new surface. A caller Binder
 death recipient cleans up after a host process dies. Session ownership is checked

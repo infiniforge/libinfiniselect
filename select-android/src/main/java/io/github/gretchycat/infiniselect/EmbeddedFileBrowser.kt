@@ -61,6 +61,7 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
     @Volatile private var openVersion = 0
     private var sessionOpenVersion = -1
     private var savedVersion = -1
+    private var recoveryAttemptVersion = -1
     private var savedState: Bundle? = null
     private var initialDirectory: Uri? = null
     private var lockToDirectory = false
@@ -137,7 +138,7 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
         initialLabel = label
         current = directory
         canGoBack = false
-        if (ready) command(EmbeddedBrowserProtocol.OPEN, request())
+        if (ready) command(EmbeddedBrowserProtocol.OPEN, request()) else reconnect()
     }
 
     fun location(): Uri? = current
@@ -149,7 +150,28 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
     }
 
     fun refresh() {
-        if (ready) command(EmbeddedBrowserProtocol.REFRESH)
+        if (ready) command(EmbeddedBrowserProtocol.REFRESH) else reconnect()
+    }
+
+    @android.annotation.TargetApi(30)
+    private fun reconnect() {
+        val view = surface ?: return
+        if (!view.isAttachedToWindow) return
+        view.visibility = VISIBLE
+        view.post {
+            if (ready || !view.isAttachedToWindow || view.width <= 0 || view.height <= 0) return@post
+            if (view.holder.surface.isValid) connect(view, view.width, view.height)
+        }
+    }
+
+    private fun recover(message: String) {
+        if (recoveryAttemptVersion == openVersion) {
+            fail(message)
+            return
+        }
+        recoveryAttemptVersion = openVersion
+        ready = false
+        reconnect()
     }
 
     private fun request() =
@@ -206,11 +228,13 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
                                         canGoBack =
                                             data.getBoolean(EmbeddedBrowserProtocol.CAN_GO_BACK)
                                     }
-                                    EmbeddedBrowserProtocol.ERROR ->
-                                        fail(
-                                            data.getString("message")
-                                                ?: "Folder browser unavailable"
-                                        )
+                                    EmbeddedBrowserProtocol.ERROR -> {
+                                        val message =
+                                            data.getString("message") ?: "Folder browser unavailable"
+                                        if (message.contains("unavailable", true) ||
+                                            message.contains("disconnected", true)
+                                        ) recover(message) else fail(message)
+                                    }
                                     FileSelectionContract.RESULT_SELECTED -> {
                                         val uri =
                                             data
@@ -275,7 +299,8 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
                         main.post {
                             if (token == generation) {
                                 disconnect()
-                                fail("InfiniFolder disconnected")
+                                surface?.visibility = GONE
+                                fallback.visibility = VISIBLE
                             }
                         }
                     }
@@ -289,6 +314,7 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
                     else {
                         runCatching { view.setChildSurfacePackage(pkg) }
                             .onSuccess {
+                                recoveryAttemptVersion = -1
                                 fallback.visibility = GONE
                                 onReady()
                             }
@@ -330,7 +356,13 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
                 }
             } catch (error: Exception) {
                 closeRemote()
-                main.post { if (token == generation) fail(error.message ?: "Folder disconnected") }
+                main.post {
+                    if (token == generation) {
+                        val message = error.message ?: "Folder disconnected"
+                        if (action == EmbeddedBrowserProtocol.REFRESH) recover(message)
+                        else fail(message)
+                    }
+                }
             }
         }
     }

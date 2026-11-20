@@ -5,5 +5,5 @@ plugins {
 
 allprojects {
     group = "io.github.gretchycat.libinfiniselect"
-    version = "0.2.4"
+    version = "0.2.5"
 }
