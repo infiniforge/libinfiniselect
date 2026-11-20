@@ -34,20 +34,10 @@ JSON round-trip, page bounds, caller namespaces, traversal/symlink rejection and
 
 [Deferred playlist ownership migration](TODO.md): playlist generation will move to InfiniMedia using this listing API later.
 
-## Shared browser appearance and artwork
+## Separation from embedded browsing
 
-Version 0.1.3 adds optional worker-thread `FolderStorage.browserStyle(context)` and
-`FolderStorage.artwork(context, authoritativeUri, sizePx)` requests. Methods
-`io.github.gretchycat.infiniselect.BROWSER_APPEARANCE` and `BROWSER_ARTWORK` use the
-same caller identification as the listing relay. Appearance returns `version=1`
-and a `style` Bundle of FileCardStyle properties. Artwork accepts `uri` and `size`
-(clamped to 16–256 px), resolves metadata with Folder's provider and uses the same
-ResourceIconResolver as its normal/floating browsers. It returns `version=1`,
-`label`, `directory`, and optional `png` (at most 256 KiB and 256×256 pixels).
-No original content URI/grant, credentials or source bytes are returned.
-
-The embedded view loads artwork on two workers, caches a bounded 8 MiB of images,
-and rejects stale callbacks after navigation, mode changes or detach. Failures
-leave a placeholder; older/absent Folder uses host Android appearance. Update
-Folder alongside the client for normal Folder themes and thumbnails. This API
-provides existing artwork; online box-art lookup remains a future caller action.
+The JSON listing API remains available for non-UI clients and the deferred
+playlist migration. Embedded browsing does not consume this API or render its
+records: it hosts Folder's complete browser through the [embedding gateway](embedded-browser.md).
+The experimental 0.1.3 appearance/artwork calls and copied presentation API were
+removed in 0.2.0; Folder owns and renders its appearance and artwork directly.

@@ -5,7 +5,7 @@ flow without depending on InfiniFolder's UI or storage implementation.
 
 ## Embedded browser
 
-Version 0.1.2 adds relayed JSON directory listings and scoped shortcut collection writes, without broad storage permissions in clients. It also supports `preferredViewMode = FileViewMode.LIST` or `ICON` in floating requests and embedded constructors. See [relay API](docs/relay-storage.md). The 0.1.1 release introduced `EmbeddedFileBrowser` for local files, granted SAF trees and optional InfiniFolder sources, with persistent list/icon views and breadcrumbs. `FileShortcut` reads/writes compatible `.iflink` documents and deduplicates by authoritative identity. See [embedded browser API and limits](docs/embedded-browser.md).
+Version 0.2.0 embeds the complete existing InfiniFolder browser through an Android surface. Folder owns all file views, breadcrumbs, directory navigation, menus, gestures and artwork; InfiniSelect only hosts the surface and forwards commands/results. In-app embedding requires Android 11+ and updated Folder. Other configurations use ordinary file selection, with no second browser implementation. The JSON directory/collection APIs remain available independently. See [the browser gateway](docs/embedded-browser.md) and [relay API](docs/relay-storage.md).
 
 ## Use
 
@@ -314,10 +314,3 @@ provider-wide access alone is insufficient for a cross-application permission
 check. Newer Android versions additionally expose a full content permission check.
 Capability metadata distinguishes an already persisted grant (`persisted`) from
 seek support, which is probed on the actual open descriptor.
-
-
-The embedded browser uses the actual shared InfiniFolder file cards, filename
-rendering, grid and viewport, extracted into this library. Folder's normal and
-floating browsers use these same components. Updated Folder provides its active
-appearance and existing themed thumbnails through the permission-free relay;
-see [the browser API](docs/embedded-browser.md).

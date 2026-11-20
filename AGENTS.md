@@ -24,4 +24,4 @@ Owns the optional InfiniFolder picker integration, Android SAF fallback, grant-a
 - `AGENTS.md` — repository-specific development rules and this ecosystem workflow.
 - `docs/README.md` — local documentation index.
 - `docs/ECOSYSTEM.md` — generated ecosystem-wide inventory, boundaries, dependencies, versions, and protocols.
-Owns the embeddable browser View and interoperable .iflink API; see `docs/embedded-browser.md`.
+Owns only the embedded browser gateway/transport and interoperable .iflink API. All file views, breadcrumbs, navigation, gestures, sorting and artwork stay in InfiniFolder. Never add a replacement browser or copy/extract Folder views into this library; see `docs/embedded-browser.md`.

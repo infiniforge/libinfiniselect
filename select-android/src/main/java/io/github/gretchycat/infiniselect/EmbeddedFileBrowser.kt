@@ -1,531 +1,348 @@
 package io.github.gretchycat.infiniselect
 
+import android.content.ContentProviderClient
 import android.content.Context
-import android.database.ContentObserver
 import android.net.Uri
-import android.os.Environment
-import android.os.Handler
-import android.os.Looper
-import android.provider.DocumentsContract
-import android.view.Gravity
-import android.view.View
-import android.widget.*
-import io.github.gretchycat.infiniselect.browser.*
-import java.io.File
+import android.os.*
+import android.view.SurfaceControlViewHost
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import android.widget.Button
+import android.widget.FrameLayout
 import java.util.concurrent.Executors
 
 /**
- * Embeddable source browser. Folder storage is accessed only through its grant-checked relay; file
- * cards, names, grid and viewport are the normal InfiniFolder renderer.
+ * Gateway to Folder's complete browser, running in Folder's process. This View only hosts its
+ * remote surface and relays commands/results. Folder owns every breadcrumb, file card, menu,
+ * listing, gesture and navigation operation.
  */
 class EmbeddedFileBrowser
 @JvmOverloads
-constructor(context: Context, preferredViewMode: FileViewMode? = null) : LinearLayout(context) {
-    var sortByModified: Boolean = false
+constructor(context: Context, private val preferredViewMode: FileViewMode? = null) :
+    FrameLayout(context) {
     var onSelected: (SelectionItem) -> Unit = {}
-    var fileActions: (SelectionItem) -> List<SelectionAction> = { emptyList() }
     var onFileAction: (String, SelectionItem) -> Unit = { _, _ -> }
-    var onFileMenu: (SelectionItem) -> Unit = {}
-    var onRequestTree: (Uri?) -> Unit = {}
-    var canBrowseLocal: () -> Boolean = {
-        File(Environment.getExternalStorageDirectory().path).canRead()
-    }
-    var onRequestLocalAccess: () -> Unit = {}
     var onRequestOpen: () -> Unit = {}
     var onError: (String) -> Unit = {}
-    private val prefs = context.getSharedPreferences("infiniselect.embedded", 0)
+    var fileActions: List<SelectionAction> = emptyList()
+        set(value) {
+            field = SelectionAction.validate(value)
+            configure()
+        }
+
+    var breadcrumbsEnabled =
+        context.getSharedPreferences("infiniselect.embedded", 0).getBoolean("breadcrumbs", true)
+        set(value) {
+            field = value
+            context
+                .getSharedPreferences("infiniselect.embedded", 0)
+                .edit()
+                .putBoolean("breadcrumbs", value)
+                .apply()
+            configure()
+        }
+
+    var selectLinkDocuments = false
+        set(value) {
+            field = value
+            configure()
+        }
+
+    var sortByModified = false
+        set(value) {
+            field = value
+            configure()
+        }
+
     private val main = Handler(Looper.getMainLooper())
-    private var executor = Executors.newSingleThreadExecutor()
-    private var generation = 0
+    private val lifetime = Binder()
+    @Volatile private var generation = 0
+    private var initialDirectory: Uri? = null
+    private var initialLabel = "Virtual root"
     private var current: Uri? = null
-    private var trail = mutableListOf<Pair<Uri?, String>>()
-    private var entries = emptyList<Entry>()
-    private val navigation = LinearLayout(context)
-    private val path = TextView(context)
-    private val toggle = Button(context)
-    private val status = TextView(context)
-    private val scroll = ScrollView(context)
-    private val content = LinearLayout(context).apply { orientation = VERTICAL }
-    private var appearance = FileCardStyle.from(context)
-    private var surface: VirtualizedEntrySurface<Entry>? = null
-    @Volatile private var renderGeneration = 0
-    private var artworkExecutor = Executors.newFixedThreadPool(2)
-    private val artworkCache =
-        object : android.util.LruCache<String, FolderStorage.Artwork>(8 * 1024 * 1024) {
-            override fun sizeOf(key: String, value: FolderStorage.Artwork) =
-                value.bitmap.allocationByteCount
+    private var canGoBack = false
+    private var ready = false
+    // Worker-owned connection; held for the full embedded lifetime to keep Folder alive.
+    private var remote: ContentProviderClient? = null
+    private var session: String? = null
+    private var server: IBinder? = null
+    private var serverDeath: IBinder.DeathRecipient? = null
+    private var surface: SurfaceView? = null
+    private val fallback =
+        Button(context).apply {
+            text = "Open files"
+            isAllCaps = false
+            contentDescription = "Open the file selector"
+            setOnClickListener { onRequestOpen() }
         }
-    private var observed: Uri? = null
-    private val observer =
-        object : ContentObserver(main) {
-            override fun onChange(selfChange: Boolean) {
-                refresh()
-            }
-        }
-    var breadcrumbsEnabled: Boolean = prefs.getBoolean("breadcrumbs", true)
-        set(value) {
-            field = value
-            prefs.edit().putBoolean("breadcrumbs", value).apply()
-            navigation.visibility = if (value) VISIBLE else GONE
-        }
-
-    var iconMode: Boolean =
-        FileViewMode.initialIconMode(preferredViewMode, prefs.getBoolean("icons", false))
-        set(value) {
-            field = value
-            prefs.edit().putBoolean("icons", value).apply()
-            render()
-        }
-
-    data class Entry(
-        val uri: Uri,
-        val name: String,
-        val directory: Boolean,
-        val mime: String,
-        val size: Long?,
-        val label: String = name,
-        val modified: Long = 0,
-        val relayed: Boolean = false,
-    )
 
     init {
-        orientation = VERTICAL
-        setBackgroundColor(appearance.background)
-        navigation.gravity = Gravity.CENTER_VERTICAL
-        navigation.addView(button("‹") { goBack() })
-        path.setTextColor(0xffd8e6ee.toInt())
-        path.setPadding(8, 8, 8, 8)
-        navigation.addView(path, LayoutParams(0, -2, 1f))
-        navigation.addView(toggle)
-        toggle.isAllCaps = false
-        toggle.setOnClickListener { iconMode = !iconMode }
-        addView(navigation)
-        addView(status)
-        scroll.addView(content)
-        scroll.setOnScrollChangeListener { _, _, y, _, _ ->
-            surface?.updateViewport(y, scroll.height)
-        }
-        addView(scroll, LayoutParams(-1, 0, 1f))
-        navigation.visibility = if (breadcrumbsEnabled) VISIBLE else GONE
+        addView(fallback, LayoutParams(-1, -2))
+        if (Build.VERSION.SDK_INT >= 30) installSurface()
     }
 
-    private fun button(label: String, action: () -> Unit) =
-        Button(context).apply {
-            text = label
-            isAllCaps = false
-            minHeight = (48 * resources.displayMetrics.density).toInt()
-            setOnClickListener { action() }
-        }
+    @android.annotation.TargetApi(30)
+    private fun installSurface() {
+        val view = SurfaceView(context)
+        surface = view
+        addView(view, LayoutParams(-1, -1))
+        view.holder.addCallback(
+            object : SurfaceHolder.Callback {
+                override fun surfaceCreated(holder: SurfaceHolder) {}
 
-    /**
-     * null is Virtual root; a directory is a navigation boundary (Recents/Favorites stay within
-     * it).
-     */
+                override fun surfaceChanged(
+                    holder: SurfaceHolder,
+                    format: Int,
+                    width: Int,
+                    height: Int,
+                ) {
+                    if (width <= 0 || height <= 0) return
+                    if (ready)
+                        command(
+                            EmbeddedBrowserProtocol.RESIZE,
+                            Bundle().apply {
+                                putInt(EmbeddedBrowserProtocol.WIDTH, width)
+                                putInt(EmbeddedBrowserProtocol.HEIGHT, height)
+                            },
+                        )
+                    else connect(view, width, height)
+                }
+
+                override fun surfaceDestroyed(holder: SurfaceHolder) {
+                    disconnect()
+                }
+            }
+        )
+    }
+
     fun open(directory: Uri? = null, label: String = "Virtual root") {
+        initialDirectory = directory
+        initialLabel = label
         current = directory
-        scroll.scrollTo(0, 0)
-        trail = mutableListOf(directory to label)
-        refresh()
+        canGoBack = false
+        if (ready) command(EmbeddedBrowserProtocol.OPEN, request())
     }
 
     fun location(): Uri? = current
 
     fun goBack(): Boolean {
-        if (trail.size <= 1) return false
-        trail.removeAt(trail.lastIndex)
-        current = trail.last().first
-        refresh()
+        if (!ready || !canGoBack) return false
+        command(EmbeddedBrowserProtocol.BACK)
         return true
     }
 
     fun refresh() {
-        val token = ++generation
-        val directory = current
-        path.text = trail.joinToString(" › ") { it.second }
-        status.text = "Loading…"
-        status.setTextColor(0xffd8e6ee.toInt())
-        observed?.let { context.contentResolver.unregisterContentObserver(observer) }
-        observed = null
-        if (executor.isShutdown) executor = Executors.newSingleThreadExecutor()
-        executor.execute {
-            val style =
-                if (FolderStorage.available(context)) FolderStorage.browserStyle(context)
-                else appearance
-            val result = runCatching { if (directory == null) roots() else list(directory) }
-            main.post {
-                if (token != generation) return@post
-                appearance = style
-                result.fold(
-                    {
-                        entries = it
-                        status.text = if (it.isEmpty()) "This folder is empty" else ""
-                        render()
-                        if (directory?.scheme == "content")
-                            runCatching {
-                                val children =
-                                    DocumentsContract.buildChildDocumentsUriUsingTree(
-                                        directory,
-                                        DocumentsContract.getDocumentId(directory),
-                                    )
-                                context.contentResolver.registerContentObserver(
-                                    children,
-                                    false,
-                                    observer,
-                                )
-                                observed = children
-                            }
-                    },
-                    {
-                        entries = emptyList()
-                        render()
-                        status.text = it.message ?: "Cannot open folder"
-                    },
-                )
+        if (ready) command(EmbeddedBrowserProtocol.REFRESH)
+    }
+
+    private fun request() =
+        Bundle().apply {
+            putString(EmbeddedBrowserProtocol.DIRECTORY, initialDirectory?.toString())
+            putString(EmbeddedBrowserProtocol.LABEL, initialLabel)
+            putBoolean(EmbeddedBrowserProtocol.BREADCRUMBS, breadcrumbsEnabled)
+            putBoolean(EmbeddedBrowserProtocol.SORT_MODIFIED, sortByModified)
+            putBoolean(EmbeddedBrowserProtocol.SELECT_LINK_DOCUMENTS, selectLinkDocuments)
+            preferredViewMode?.let {
+                putString(FileSelectionContract.EXTRA_PREFERRED_VIEW_MODE, it.name)
             }
-        }
-    }
-
-    private fun relay(directory: Uri?): List<Entry> {
-        val token = generation
-        val listing = FolderStorage.list(context, directory)
-        if (listing.loading) main.postDelayed({ if (token == generation) refresh() }, 1000)
-        return listing.entries.map {
-            Entry(it.uri, it.name, it.directory, it.mime, it.size, it.label, it.modified, true)
-        }
-    }
-
-    private fun privateLocation(uri: Uri): Boolean =
-        uri.scheme == "file" &&
-            runCatching {
-                    val path = File(uri.path!!).canonicalPath
-                    path.startsWith(context.filesDir.canonicalPath + "/") ||
-                        path.startsWith(context.cacheDir.canonicalPath + "/")
-                }
-                .getOrDefault(false)
-
-    private fun roots(): List<Entry> {
-        val out = mutableListOf<Entry>()
-        if (FolderStorage.available(context)) out.addAll(relay(null))
-        context.contentResolver.persistedUriPermissions
-            .filter { it.isReadPermission && DocumentsContract.isTreeUri(it.uri) }
-            .forEach {
-                out +=
-                    Entry(
-                        document(it.uri),
-                        "Android storage",
-                        true,
-                        DocumentsContract.Document.MIME_TYPE_DIR,
-                        null,
-                    )
-            }
-        out += Entry(Uri.parse("infiniselect://add-storage"), "Add storage folder…", true, "", null)
-        out += Entry(Uri.parse("infiniselect://open"), "Android file picker…", true, "", null)
-        return out.distinctBy { it.uri }
-    }
-
-    private fun document(tree: Uri) =
-        DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
-
-    private fun list(directory: Uri): List<Entry> {
-        if (!privateLocation(directory) && FolderStorage.available(context))
-            return sorted(relay(directory))
-        val result =
-            if (directory.scheme == "file") {
-                val file = File(requireNotNull(directory.path))
-                require(file.isDirectory && file.canRead()) {
-                    "Allow internal storage access to browse this directory"
-                }
-                requireNotNull(file.listFiles()) { "Cannot list directory" }
-                    .filter { !it.name.startsWith(".") }
-                    .map {
-                        val uri = Uri.fromFile(it)
-                        val label =
-                            if (it.extension.equals("iflink", true))
-                                runCatching {
-                                        FileShortcut.decode(it.readTextLimited()).displayName
-                                    }
-                                    .getOrDefault(it.name)
-                            else it.name
-                        Entry(
-                            uri,
-                            it.name,
-                            it.isDirectory,
-                            if (it.isDirectory) DocumentsContract.Document.MIME_TYPE_DIR
-                            else "application/octet-stream",
-                            if (it.isFile) it.length() else null,
-                            label,
-                            it.lastModified(),
-                        )
-                    }
-            } else {
-                require(DocumentsContract.isTreeUri(directory)) {
-                    "Select a storage folder to grant browsing access"
-                }
-                val uri =
-                    DocumentsContract.buildChildDocumentsUriUsingTree(
-                        directory,
-                        DocumentsContract.getDocumentId(directory),
-                    )
-                val projection =
-                    arrayOf(
-                        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                        DocumentsContract.Document.COLUMN_MIME_TYPE,
-                        DocumentsContract.Document.COLUMN_SIZE,
-                    )
-                val rows = mutableListOf<Entry>()
-                context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-                    while (cursor.moveToNext()) {
-                        val id = cursor.getString(0)
-                        val name = cursor.getString(1)
-                        val mime = cursor.getString(2) ?: "application/octet-stream"
-                        rows +=
-                            Entry(
-                                DocumentsContract.buildDocumentUriUsingTree(directory, id),
-                                name,
-                                mime == DocumentsContract.Document.MIME_TYPE_DIR,
-                                mime,
-                                if (cursor.isNull(3)) null else cursor.getLong(3),
-                            )
-                    }
-                } ?: error("Storage provider returned no directory listing")
-                rows
-            }
-        return sorted(result)
-    }
-
-    private fun sorted(result: List<Entry>): List<Entry> {
-        val files =
-            if (sortByModified)
-                compareByDescending<Entry> { it.modified }.thenBy { it.label.lowercase() }
-            else compareBy<Entry> { it.label.lowercase() }
-        return result.sortedWith(compareBy<Entry> { !it.directory }.then(files))
-    }
-
-    private fun File.readTextLimited(): String =
-        inputStream().use {
-            val bytes = it.readShortcutBytes()
-            require(bytes.size <= FileShortcut.MAX_BYTES)
-            String(bytes, Charsets.UTF_8)
-        }
-
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        if (w != oldw && w > 0) render() else surface?.updateViewport(scroll.scrollY, scroll.height)
-    }
-
-    private fun render() {
-        val revision = ++renderGeneration
-        artworkCache.evictAll()
-        toggle.text = if (iconMode) "☷ List" else "▦ Icons"
-        toggle.contentDescription = if (iconMode) "Switch to list view" else "Switch to icon view"
-        setBackgroundColor(appearance.background)
-        path.setTextColor(appearance.textPrimary)
-        status.setTextColor(appearance.textSecondary)
-        surface = null
-        content.removeAllViews()
-        val density = resources.displayMetrics.density
-        val iconDp = 56
-        val widthPx = width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
-        val columns = if (iconMode) FileViewGrid.columns((widthPx / density).toInt(), iconDp) else 1
-        val cellWidth = widthPx / columns
-        val size = ((if (iconMode) iconDp else 44) * density).toInt().coerceIn(16, 256)
-        val makeCard: (Entry) -> View = { entry ->
-            val card =
-                FileEntryCard(
-                    context,
-                    FileCardEntry(entry.directory, shortcut = entry.name.endsWith(".iflink", true)),
-                    iconMode,
-                    iconDp,
-                    appearance.isDark,
-                    cardTheme = appearance,
-                )
-            val image =
-                ImageView(context).apply {
-                    scaleType = ImageView.ScaleType.FIT_CENTER
-                    setImageResource(
-                        if (entry.directory) android.R.drawable.ic_menu_agenda
-                        else android.R.drawable.ic_menu_save
-                    )
-                    contentDescription = if (entry.directory) "Folder" else "File"
-                }
-            card.attachIcon(image)
-            card.addLabels(
-                entry.label,
-                entry.directory,
-                (cellWidth - 4 * density).toInt().coerceAtLeast(36),
-                if (entry.directory) "Folder"
-                else
-                    entry.size
-                        ?.let { android.text.format.Formatter.formatShortFileSize(context, it) }
-                        .orEmpty(),
+            putStringArrayList(
+                FileSelectionContract.EXTRA_FILE_ACTION_IDS,
+                ArrayList(fileActions.map { it.id }),
             )
-            card.container.setOnClickListener { activate(entry) }
-            card.container.setOnLongClickListener { anchor ->
-                if (!entry.directory) {
-                    select(entry, true, anchor)
-                    true
-                } else false
-            }
-            // Artwork stays in Folder's resolver; no source or permission crosses into the host.
-            if (entry.relayed) {
-                val key =
-                    "${entry.uri}:${entry.modified}:${entry.size}:$size:${appearance.hashCode()}"
-                fun apply(art: FolderStorage.Artwork) {
-                    image.setImageBitmap(art.bitmap)
-                    if (entry.name.endsWith(".iflink", true) && art.label.isNotBlank())
-                        card.nameView.setFileName(art.label, art.directory)
-                }
-                artworkCache.get(key)?.let(::apply)
-                    ?: run {
-                        if (artworkExecutor.isShutdown)
-                            artworkExecutor = Executors.newFixedThreadPool(2)
-                        artworkExecutor.execute {
-                            if (revision != renderGeneration) return@execute
-                            val art =
-                                runCatching { FolderStorage.artwork(context, entry.uri, size) }
-                                    .getOrNull()
-                            if (art != null && revision == renderGeneration) {
-                                artworkCache.put(key, art)
-                                main.post {
-                                    if (
-                                        revision == renderGeneration &&
-                                            card.container.isAttachedToWindow
-                                    )
-                                        apply(art)
+            putStringArrayList(
+                FileSelectionContract.EXTRA_FILE_ACTION_LABELS,
+                ArrayList(fileActions.map { it.label }),
+            )
+        }
+
+    private fun configure() {
+        if (ready) command(EmbeddedBrowserProtocol.CONFIGURE, request())
+    }
+
+    @android.annotation.TargetApi(30)
+    @Suppress("DEPRECATION")
+    private fun connect(view: SurfaceView, width: Int, height: Int) {
+        val token = ++generation
+        ready = true // coalesce layout callbacks while creation is pending
+        val args =
+            request().apply {
+                putInt("version", EmbeddedBrowserProtocol.VERSION)
+                putString(EmbeddedBrowserProtocol.ACTION, EmbeddedBrowserProtocol.CREATE)
+                putBinder(EmbeddedBrowserProtocol.HOST_TOKEN, view.hostToken)
+                putBinder(EmbeddedBrowserProtocol.LIFETIME, lifetime)
+                putInt(EmbeddedBrowserProtocol.WIDTH, width)
+                putInt(EmbeddedBrowserProtocol.HEIGHT, height)
+                putInt(EmbeddedBrowserProtocol.DISPLAY, view.display.displayId)
+                putParcelable(
+                    EmbeddedBrowserProtocol.RECEIVER,
+                    object : ResultReceiver(main) {
+                        override fun onReceiveResult(code: Int, data: Bundle?) {
+                            if (token != generation || data == null) return
+                            when (code) {
+                                EmbeddedBrowserProtocol.NAVIGATION -> {
+                                    current =
+                                        data
+                                            .getString(EmbeddedBrowserProtocol.DIRECTORY)
+                                            ?.let(Uri::parse)
+                                    canGoBack = data.getBoolean(EmbeddedBrowserProtocol.CAN_GO_BACK)
+                                }
+                                EmbeddedBrowserProtocol.ERROR ->
+                                    fail(data.getString("message") ?: "Folder browser unavailable")
+                                FileSelectionContract.RESULT_SELECTED -> {
+                                    val uri =
+                                        data
+                                            .getString(FileSelectionContract.EXTRA_RESULT_URI)
+                                            ?.let(Uri::parse) ?: return
+                                    val item =
+                                        SelectionItem(
+                                            uri,
+                                            data
+                                                .getString(FileSelectionContract.EXTRA_RESULT_NAME)
+                                                .orEmpty(),
+                                            data.getString(FileSelectionContract.EXTRA_RESULT_MIME)
+                                                ?: "application/octet-stream",
+                                            data
+                                                .getLong(
+                                                    FileSelectionContract.EXTRA_RESULT_SIZE,
+                                                    -1L,
+                                                )
+                                                .takeIf { it >= 0 },
+                                            sourceReference =
+                                                data.getString(EmbeddedBrowserProtocol.SOURCE),
+                                        )
+                                    val action =
+                                        data.getString(
+                                            FileSelectionContract.EXTRA_RESULT_FILE_ACTION
+                                        )
+                                    if (action == null) onSelected(item)
+                                    else if (fileActions.any { it.id == action })
+                                        onFileAction(action, item)
                                 }
                             }
                         }
-                    }
+                    },
+                )
             }
-            card.container
-        }
-        if (entries.size > 48) {
-            surface =
-                VirtualizedEntrySurface(
-                    context,
-                    entries,
-                    columns,
-                    ((if (iconMode) iconDp + 48 else 64) * density).toInt(),
-                    makeCard,
-                )
-            content.addView(surface)
-            scroll.post { surface?.updateViewport(scroll.scrollY, scroll.height) }
-        } else {
-            content.addView(FileViewGrid.build(context, entries, columns, card = makeCard))
-        }
-    }
-
-    private fun activate(entry: Entry) {
-        when (entry.uri.toString()) {
-            "infiniselect://folder-access" ->
-                onRequestTree(
-                    DocumentsContract.buildDocumentUri(
-                        FileSelectionContract.INFINIFOLDER_DOCUMENTS_AUTHORITY,
-                        "root",
-                    )
-                )
-            "infiniselect://add-storage" -> onRequestTree(null)
-            "infiniselect://open" -> onRequestOpen()
-            else ->
-                if (entry.directory) {
-                    if (
-                        entry.uri.scheme == "file" &&
-                            !entry.relayed &&
-                            !privateLocation(entry.uri) &&
-                            !canBrowseLocal()
-                    )
-                        onRequestLocalAccess()
-                    else {
-                        current = entry.uri
-                        trail.add(entry.uri to entry.label)
-                        scroll.scrollTo(0, 0)
-                        refresh()
-                    }
-                } else select(entry, false)
-        }
-    }
-
-    private fun select(entry: Entry, menu: Boolean, anchor: android.view.View? = null) {
-        val token = generation
-        executor.execute {
-            val result = runCatching {
-                val source =
-                    if (entry.relayed)
-                        InfiniSelect.requireSource(
-                            context,
-                            entry.uri.toString(),
-                            entry.name,
-                            entry.mime,
-                            entry.size,
+        calls.execute {
+            if (token != generation) return@execute
+            try {
+                closeRemote()
+                val client =
+                    context.contentResolver.acquireUnstableContentProviderClient(
+                        Uri.parse(
+                            "content://" + FileSelectionContract.INFINIFOLDER_SELECTION_AUTHORITY
                         )
-                    else null
-                val access =
-                    source?.contentUri
-                        ?: if (entry.uri.scheme == "file")
-                            InfiniSelect.createFileDocument(
-                                context,
-                                File(entry.uri.path!!),
-                                entry.name,
-                                entry.mime,
-                            )
-                        else entry.uri
-                val identity =
-                    InfiniSelect.authoritativeUri(context, entry.uri.toString()) ?: entry.uri
-                SelectionItem(
-                    access,
-                    entry.name,
-                    entry.mime,
-                    entry.size,
-                    sourceReference = identity.toString(),
-                )
-            }
-            main.post {
-                if (token == generation)
-                    result.fold(
-                        { item ->
-                            if (!menu) onSelected(item)
-                            else {
-                                val actions =
-                                    runCatching { SelectionAction.validate(fileActions(item)) }
-                                        .getOrElse {
-                                            onError(it.message ?: "Invalid file actions")
-                                            return@fold
-                                        }
-                                if (actions.isEmpty()) onFileMenu(item)
-                                else
-                                    PopupMenu(context, anchor ?: this)
-                                        .apply {
-                                            this.menu.add(0, 0, 0, "Open")
-                                            actions.forEachIndexed { index, action ->
-                                                this.menu.add(0, index + 1, index + 1, action.label)
-                                            }
-                                            setOnMenuItemClickListener { selected ->
-                                                if (selected.itemId == 0) onSelected(item)
-                                                else
-                                                    actions.getOrNull(selected.itemId - 1)?.let {
-                                                        onFileAction(it.id, item)
-                                                    }
-                                                true
-                                            }
-                                        }
-                                        .show()
+                    ) ?: error("Install or update InfiniFolder to embed its browser")
+                remote = client
+                val reply =
+                    client.call(EmbeddedBrowserProtocol.METHOD, null, args)
+                        ?: error("Update InfiniFolder to embed its browser")
+                require(reply.getInt("version") == EmbeddedBrowserProtocol.VERSION)
+                session = requireNotNull(reply.getString(EmbeddedBrowserProtocol.SESSION))
+                server = requireNotNull(reply.getBinder(EmbeddedBrowserProtocol.SERVER))
+                serverDeath =
+                    IBinder.DeathRecipient {
+                        main.post {
+                            if (token == generation) {
+                                disconnect()
+                                fail("InfiniFolder disconnected")
                             }
-                        },
-                        { onError(it.message ?: "Cannot open file") },
-                    )
+                        }
+                    }
+                server!!.linkToDeath(serverDeath!!, 0)
+                val pkg =
+                    reply.getParcelable<SurfaceControlViewHost.SurfacePackage>(
+                        EmbeddedBrowserProtocol.SURFACE
+                    ) ?: error("InfiniFolder did not return its browser surface")
+                main.post {
+                    if (token != generation || !view.holder.surface.isValid) pkg.release()
+                    else {
+                        runCatching { view.setChildSurfacePackage(pkg) }
+                            .onSuccess { fallback.visibility = GONE }
+                            .onFailure {
+                                pkg.release()
+                                disconnect()
+                                fail(it.message ?: "Cannot attach Folder browser")
+                            }
+                    }
+                }
+            } catch (error: Exception) {
+                closeRemote()
+                main.post {
+                    if (token == generation) fail(error.message ?: "Folder browser unavailable")
+                }
             }
         }
+    }
+
+    private fun command(action: String, args: Bundle = Bundle()) {
+        val token = generation
+        calls.execute {
+            if (token != generation) return@execute
+            val id = session ?: return@execute
+            try {
+                remote?.call(
+                    EmbeddedBrowserProtocol.METHOD,
+                    null,
+                    args.apply {
+                        putString(EmbeddedBrowserProtocol.ACTION, action)
+                        putString(EmbeddedBrowserProtocol.SESSION, id)
+                    },
+                )
+            } catch (error: Exception) {
+                closeRemote()
+                main.post { if (token == generation) fail(error.message ?: "Folder disconnected") }
+            }
+        }
+    }
+
+    private fun fail(message: String) {
+        ready = false
+        surface?.visibility = GONE
+        fallback.visibility = VISIBLE
+        onError(message)
+    }
+
+    private fun closeRemote() {
+        val client = remote
+        val id = session
+        val death = serverDeath
+        if (death != null) runCatching { server?.unlinkToDeath(death, 0) }
+        server = null
+        serverDeath = null
+        remote = null
+        session = null
+        try {
+            if (id != null)
+                client?.call(
+                    EmbeddedBrowserProtocol.METHOD,
+                    null,
+                    Bundle().apply {
+                        putString(EmbeddedBrowserProtocol.ACTION, EmbeddedBrowserProtocol.CLOSE)
+                        putString(EmbeddedBrowserProtocol.SESSION, id)
+                    },
+                )
+        } catch (_: Exception) {} finally {
+            client?.close()
+        }
+    }
+
+    private fun disconnect() {
+        ++generation
+        ready = false
+        canGoBack = false
+        calls.execute { closeRemote() }
     }
 
     override fun onDetachedFromWindow() {
-        ++generation
-        ++renderGeneration
-        artworkExecutor.shutdownNow()
-        observed?.let { context.contentResolver.unregisterContentObserver(observer) }
-        observed = null
-        executor.shutdownNow()
-        main.removeCallbacksAndMessages(null)
+        disconnect()
         super.onDetachedFromWindow()
+    }
+
+    companion object {
+        private val calls =
+            Executors.newSingleThreadExecutor { task ->
+                Thread(task, "InfiniSelect-browser").apply { isDaemon = true }
+            }
     }
 }

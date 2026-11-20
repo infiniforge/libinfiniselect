@@ -1,46 +1,89 @@
-# Embedded browser and file links
+# Embedding the complete InfiniFolder browser
 
-`EmbeddedFileBrowser(context, preferredViewMode = FileViewMode.LIST)` is a reusable Android View. The optional preference accepts LIST or ICON; null uses the saved mode. It initializes this instance without preventing the user from toggling. `OpenRequest(preferredViewMode = FileViewMode.ICON, ...)` passes the same preference to the floating selector. Unknown wire values are ignored. User toggles persist the mode for requests without an override.
+InfiniSelect 0.2.0 is a gateway to InfiniFolder's complete existing browser. It does
+not implement file listing UI, cards, breadcrumbs, directory history/navigation,
+sorting, gestures, thumbnails or file menus. Those views and behavior remain in
+InfiniFolder. Its floating selector and embedded sessions use the same
+FolderBrowserController, which was moved intact from the working floating service.
+The earlier partial file-card extraction and second browser have been removed.
 
 ```kotlin
 val browser = EmbeddedFileBrowser(activity, FileViewMode.LIST).apply {
+    fileActions = listOf(SelectionAction("add_favorite", "Add to favorites"))
     onSelected = { item -> openDocument(item) }
-    fileActions = { listOf(SelectionAction("add_favorite", "Add to favorites")) }
     onFileAction = { id, item -> handleAppAction(id, item) }
-    onRequestTree = { initial -> StorageAccess.selectDirectory(activity, 42, initial) }
     onRequestOpen = { openNormalInfiniSelectPicker() }
     onError = { message -> showError(message) }
 }
 container.addView(browser)
-browser.open() // Virtual root; or open(authoritativeDirectory, label)
+browser.open() // Folder's actual Virtual root, including its breadcrumb trail
 ```
 
-The browser requests [paged JSON directory listings](relay-storage.md) from InfiniFolder and lazily obtains a read relay for selected files. Folder owns local/remote/archive access; clients need no broad storage permission or Folder tree grant. No application implementation classes or credentials are copied. Without Folder, granted SAF directories, Android file selection and app-owned private link directories remain usable. The host owns ordinary Android picker results/grants and application-specific actions. The normal InfiniFolder file presentation is shared, not reimplemented: `browser.FileEntryCard`, `SmartFileNameTextView`, `FileViewGrid` and `VirtualizedEntrySurface` were extracted from Folder into this library. Folder's normal and floating browsers use these same classes through metadata/theme adapters. The embedded browser requests Folder's active appearance and its existing themed icon/thumbnail resolver over the relay. Folder still owns backend access, artwork generation and file operations. Without an updated Folder, the shared cards use the host Android appearance and placeholder icons.
+On Android 11/API 30 and newer, Folder renders and handles input in its own
+process through Android's SurfaceControlViewHost. The gateway hosts that surface
+and forwards open, resize, back, refresh and configuration commands. A retained
+unstable ContentProviderClient keeps the provider connection alive without making
+a Folder crash terminate the client; a server Binder death callback exposes a
+fallback. Host detach/surface destruction closes the session. A caller Binder
+death recipient cleans up after a host process dies. Session ownership is checked
+against the actual Binder UID, with per-caller/global limits. Selected files get
+normal read-granted relays, retaining their authoritative source separately.
+Neither an overlay permission nor a storage permission is needed in the client.
 
-The breadcrumb bar contains Back, path and the list/icon toggle. `breadcrumbsEnabled` hides/shows the whole bar; `iconMode` switches layout at runtime. Both user preferences persist per consumer. `goBack()` reports whether a parent was opened; `open(directory, label)` sets a navigation boundary. Listings run on a worker, callbacks run on the UI thread, loading backends are refreshed and detach stops the worker/observer.
+An updated installed Folder is required for in-app embedding. Without it, or on
+Android 8–10, this View offers a single Open files action through `onRequestOpen`,
+which the host wires to ordinary InfiniSelect/Android selection. There is no
+replacement file browser. Apps remain independently buildable/installable.
+
+`breadcrumbsEnabled` controls Folder's whole browser toolbar, including the
+list/icon toggle. Folder owns the actual trail and its clickable ancestors.
+`preferredViewMode` optionally initializes LIST/ICON; absent it, Folder uses its
+saved preference. Folder handles user toggles, pinch sizing, pull-to-refresh,
+source navigation, archive handling, artwork and provider changes. `goBack()`
+forwards Back when Folder's last navigation event says a parent is available;
+`location()` returns only its reported current URI. The gateway stores no trail.
+`sortByModified` requests Folder's ordering for recent collections. Setting
+`selectLinkDocuments=true` asks Folder's selection policy to return .iflink
+files so hosts such as Play can read their own extension metadata; default
+selection follows links using Folder's existing resolver.
+
+`fileActions: List<SelectionAction>` supplies long-press labels/IDs to Folder,
+which renders the menu inside its hosted view. `onFileAction(id, item)` dispatches
+the caller's choice; the caller owns Favorites/metadata side effects. A selection
+or file action leaves the embedded session open. Floating selection retains its
+existing one-result lifecycle and `OpenRequest.fileActions` contract.
+
+Compatibility: 0.2.0 replaces the experimental 0.1.x local browser and renderer
+classes. Embedded fileActions is now a list supplied when the host changes its
+page, matching floating requests. Local renderer, entry, tree-access and whole-menu
+callbacks were removed. Android SAF is the non-embedded fallback, not a second
+browser in the library.
+
+## Embedding wire contract
+
+`ContentResolver.call` on `com.infinifolder.selection` uses method
+`io.github.gretchycat.infiniselect.EMBED_BROWSER`, protocol version 1. Create
+passes display, dimensions, host input token, caller lifetime Binder,
+ResultReceiver, initial directory/label and selection configuration. It returns
+an opaque session ID, server Binder and SurfacePackage. Subsequent commands carry
+the session ID and run only for the owning UID. Dimensions are bounded at 8192 px;
+at most four sessions per UID and sixteen globally are accepted. Session state
+and complete View hierarchies stay in Folder; metadata navigation events carry
+only the current directory and whether Back is available.
 
 ## File links
 
 `FileShortcut` reads/writes version-1 `.iflink` JSON with `targetUri`, `displayNameOverride`, `targetMimeType`, `targetIsDirectory=false`, `createdAtMillis`, plus optional `infiniPlaySystem`. Documents are bounded to 128 KiB. Temporary Folder targets, directory links and unknown versions are rejected. `writeTo(directory)` atomically creates a SHA-256-named file or reuses an existing same-identity link, including user-named links. Client apps should use `ShortcutCollections` for shared directories; only the storage-owning process writes those files. Removal never deletes the target.
 
-## Caller-owned long-press actions
+## Validation
 
-`fileActions: (SelectionItem) -> List<SelectionAction>` supplies embedded menu labels/IDs. The View displays Open and those actions; `onFileAction(id, item)` returns control. Favorites, metadata/artwork services and other side effects belong to the caller. The older whole-menu `onFileMenu` callback remains available when no actions are supplied.
+The standalone AAR/JVM and Android instrumentation APK builds compile the gateway.
+`EmbeddedBrowserDeviceTest` exercises an installed Folder through a real surface:
+Folder-owned filename/breadcrumb accessibility nodes, file selection and read
+grants, and breadcrumb navigation after selection. It requires an attached
+Android 11+ device with updated Folder and Folder storage access. Compilation is
+not execution. Also check list/icon preferences, long-press Favorites actions,
+rotation/resizing, detach/recreate, provider/host process death and pre-11/absent
+Folder fallback on hardware.
 
-For floating single-file read selection, set `OpenRequest.fileActions`. Updated Folder returns normal file access/identity and `SelectionResult.actionId` after a long-press action. Handle the action instead of opening the file. Only requested action IDs are forwarded. Actions close the picker; folder New and multi-selection behavior is preserved. Android's picker and older Folder builds return ordinary selections without this menu.
-
-## Shared presentation API
-
-`io.github.gretchycat.infiniselect.browser` owns the normal file card, filename fitting,
-row/column grid and viewport virtualization. `FileCardEntry` holds visual metadata;
-`FileCardStyle` holds explicit colors/font settings without depending on Folder's
-application theme manager. Hosts provide artwork Views, interactions, optional icon
-decorations and an optional compound-extension callback for filename fitting. These
-classes never open files or request permissions. InfiniFolder adapts its ResourceEntry,
-theme and network badges; the embedded browser adapts the public directory relay.
-Listings over 48 items use the same visible-viewport card allocation as Folder.
-
-Device acceptance: compare normal Folder, floating selector and Play's embedded
-browser in list/icon modes; check long filenames, link labels/badges, light/dark
-appearance, thumbnails, large-directory flinging, rotation/reflow, selection and
-caller long-press actions. Verify Play still declares no storage permissions.
+Android API reference: [SurfaceControlViewHost](https://developer.android.com/reference/android/view/SurfaceControlViewHost).
