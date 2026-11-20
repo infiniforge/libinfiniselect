@@ -18,6 +18,7 @@ object EmbeddedBrowserProtocol {
     const val RECEIVER = "receiver"
     const val LIFETIME = "lifetime"
     const val HOST_TOKEN = "hostToken"
+    const val STATE = "browserState"
     const val SERVER = "server"
     const val SURFACE = "surface"
     const val WIDTH = "width"

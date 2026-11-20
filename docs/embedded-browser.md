@@ -24,7 +24,7 @@ process through Android's SurfaceControlViewHost. The gateway hosts that surface
 and forwards open, resize, back, refresh and configuration commands. A retained
 unstable ContentProviderClient keeps the provider connection alive without making
 a Folder crash terminate the client; a server Binder death callback exposes a
-fallback. Host detach/surface destruction closes the session. A caller Binder
+fallback. Host detach/surface destruction closes the session. Folder returns an opaque, validated trail/scroll snapshot that the gateway passes back on reattach; an explicit open discards the prior snapshot. Only Folder interprets this state. `onReady` reports attachment of the new surface. A caller Binder
 death recipient cleans up after a host process dies. Session ownership is checked
 against the actual Binder UID, with per-caller/global limits. Selected files get
 normal read-granted relays, retaining their authoritative source separately.
@@ -80,7 +80,7 @@ only the current directory and whether Back is available.
 The standalone AAR/JVM and Android instrumentation APK builds compile the gateway.
 `EmbeddedBrowserDeviceTest` exercises an installed Folder through a real surface:
 Folder-owned filename/breadcrumb accessibility nodes, file selection and read
-grants, and breadcrumb navigation after selection. It requires an attached
+grants, breadcrumb navigation after selection and surface re-creation with Folder-owned state restoration. It requires an attached
 Android 11+ device with updated Folder and Folder storage access. Compilation is
 not execution. Also check list/icon preferences, long-press Favorites actions,
 rotation/resizing, detach/recreate, provider/host process death and pre-11/absent

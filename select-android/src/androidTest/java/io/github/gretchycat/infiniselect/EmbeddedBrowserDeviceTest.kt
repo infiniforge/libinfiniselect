@@ -102,6 +102,17 @@ class EmbeddedBrowserDeviceTest {
             await("Folder breadcrumb navigation did not change the location") {
                 host.browser.location() != directory
             }
+            val rootLocation = host.browser.location()
+            val readyBefore = host.readyCount
+            instrumentation.runOnMainSync {
+                val parent = host.browser.parent as android.view.ViewGroup
+                parent.removeView(host.browser)
+                parent.addView(host.browser)
+            }
+            await("Folder surface was not re-created") { host.readyCount > readyBefore }
+            await("Folder did not restore its own browser state") {
+                host.browser.location() == rootLocation
+            }
             assertNull(host.failure)
         } finally {
             activity?.let { host -> instrumentation.runOnMainSync { host.finish() } }
@@ -114,6 +125,7 @@ class EmbeddedBrowserDeviceTest {
 
 class BrowserHostTestActivity : Activity() {
     lateinit var browser: EmbeddedFileBrowser
+    @Volatile var readyCount = 0
     @Volatile var selected: SelectionItem? = null
     @Volatile var failure: String? = null
 
@@ -122,6 +134,7 @@ class BrowserHostTestActivity : Activity() {
         browser =
             EmbeddedFileBrowser(this, FileViewMode.LIST).apply {
                 selectLinkDocuments = true
+                onReady = { readyCount++ }
                 onSelected = { selected = it }
                 onError = { failure = it }
             }

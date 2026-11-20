@@ -20,6 +20,7 @@ class EmbeddedFileBrowser
 @JvmOverloads
 constructor(context: Context, private val preferredViewMode: FileViewMode? = null) :
     FrameLayout(context) {
+    var onReady: () -> Unit = {}
     var onSelected: (SelectionItem) -> Unit = {}
     var onFileAction: (String, SelectionItem) -> Unit = { _, _ -> }
     var onRequestOpen: () -> Unit = {}
@@ -57,6 +58,10 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
     private val main = Handler(Looper.getMainLooper())
     private val lifetime = Binder()
     @Volatile private var generation = 0
+    @Volatile private var openVersion = 0
+    private var sessionOpenVersion = -1
+    private var savedVersion = -1
+    private var savedState: Bundle? = null
     private var initialDirectory: Uri? = null
     private var initialLabel = "Virtual root"
     private var current: Uri? = null
@@ -116,6 +121,7 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
     }
 
     fun open(directory: Uri? = null, label: String = "Virtual root") {
+        ++openVersion
         initialDirectory = directory
         initialLabel = label
         current = directory
@@ -163,6 +169,7 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
     @Suppress("DEPRECATION")
     private fun connect(view: SurfaceView, width: Int, height: Int) {
         val token = ++generation
+        val requestedOpenVersion = openVersion
         ready = true // coalesce layout callbacks while creation is pending
         val args =
             request().apply {
@@ -234,6 +241,9 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
                         )
                     ) ?: error("Install or update InfiniFolder to embed its browser")
                 remote = client
+                if (savedVersion == requestedOpenVersion)
+                    args.putBundle(EmbeddedBrowserProtocol.STATE, savedState)
+                sessionOpenVersion = requestedOpenVersion
                 val reply =
                     client.call(EmbeddedBrowserProtocol.METHOD, null, args)
                         ?: error("Update InfiniFolder to embed its browser")
@@ -258,7 +268,10 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
                     if (token != generation || !view.holder.surface.isValid) pkg.release()
                     else {
                         runCatching { view.setChildSurfacePackage(pkg) }
-                            .onSuccess { fallback.visibility = GONE }
+                            .onSuccess {
+                                fallback.visibility = GONE
+                                onReady()
+                            }
                             .onFailure {
                                 pkg.release()
                                 disconnect()
@@ -277,6 +290,7 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
 
     private fun command(action: String, args: Bundle = Bundle()) {
         val token = generation
+        val requestedOpenVersion = openVersion
         calls.execute {
             if (token != generation) return@execute
             val id = session ?: return@execute
@@ -289,6 +303,11 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
                         putString(EmbeddedBrowserProtocol.SESSION, id)
                     },
                 )
+                if (action == EmbeddedBrowserProtocol.OPEN) {
+                    sessionOpenVersion = requestedOpenVersion
+                    savedState = null
+                    savedVersion = -1
+                }
             } catch (error: Exception) {
                 closeRemote()
                 main.post { if (token == generation) fail(error.message ?: "Folder disconnected") }
@@ -313,15 +332,19 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
         remote = null
         session = null
         try {
-            if (id != null)
-                client?.call(
-                    EmbeddedBrowserProtocol.METHOD,
-                    null,
-                    Bundle().apply {
-                        putString(EmbeddedBrowserProtocol.ACTION, EmbeddedBrowserProtocol.CLOSE)
-                        putString(EmbeddedBrowserProtocol.SESSION, id)
-                    },
-                )
+            if (id != null) {
+                val reply =
+                    client?.call(
+                        EmbeddedBrowserProtocol.METHOD,
+                        null,
+                        Bundle().apply {
+                            putString(EmbeddedBrowserProtocol.ACTION, EmbeddedBrowserProtocol.CLOSE)
+                            putString(EmbeddedBrowserProtocol.SESSION, id)
+                        },
+                    )
+                savedState = reply?.getBundle(EmbeddedBrowserProtocol.STATE)
+                savedVersion = sessionOpenVersion
+            }
         } catch (_: Exception) {} finally {
             client?.close()
         }
