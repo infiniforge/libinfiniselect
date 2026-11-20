@@ -8,6 +8,8 @@ import java.io.File
 /** Public relay client. Call on a worker; storage privileges remain with InfiniFolder. */
 object FolderStorage {
     const val LIST = "io.github.gretchycat.infiniselect.LIST_DIRECTORY"
+    const val APPEARANCE = "io.github.gretchycat.infiniselect.BROWSER_APPEARANCE"
+    const val ARTWORK = "io.github.gretchycat.infiniselect.BROWSER_ARTWORK"
     const val COLLECTION = "io.github.gretchycat.infiniselect.SHORTCUT_COLLECTION"
 
     fun available(context: Context): Boolean =
@@ -26,6 +28,47 @@ object FolderStorage {
             ?: throw UnsupportedOperationException(
                 "Update InfiniFolder to use relayed browsing and collections"
             )
+
+    /** Folder's active appearance; absent/older Folder returns the host Android appearance. */
+    fun browserStyle(context: Context): io.github.gretchycat.infiniselect.browser.FileCardStyle =
+        runCatching {
+                val reply = call(context, APPEARANCE, Bundle())
+                require(reply.getInt("version") == 1)
+                io.github.gretchycat.infiniselect.browser.FileCardStyle.fromBundle(
+                    requireNotNull(reply.getBundle("style"))
+                )
+            }
+            .getOrElse { io.github.gretchycat.infiniselect.browser.FileCardStyle.from(context) }
+
+    data class Artwork(
+        val bitmap: android.graphics.Bitmap,
+        val label: String,
+        val directory: Boolean,
+    )
+
+    /** Same themed artwork/thumbnail resolver as Folder, with a bounded PNG reply. Worker only. */
+    fun artwork(context: Context, uri: Uri, size: Int): Artwork? {
+        val reply =
+            call(
+                context,
+                ARTWORK,
+                Bundle().apply {
+                    putString("uri", uri.toString())
+                    putInt("size", size.coerceIn(16, 256))
+                },
+            )
+        require(reply.getInt("version") == 1)
+        val bytes = reply.getByteArray("png") ?: return null
+        require(bytes.size <= 256 * 1024) { "Artwork reply too large" }
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        require(bounds.outWidth in 1..256 && bounds.outHeight in 1..256) {
+            "Invalid artwork dimensions"
+        }
+        val bitmap =
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        return Artwork(bitmap, reply.getString("label").orEmpty(), reply.getBoolean("directory"))
+    }
 
     data class Entry(
         val uri: Uri,

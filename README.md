@@ -314,3 +314,10 @@ provider-wide access alone is insufficient for a cross-application permission
 check. Newer Android versions additionally expose a full content permission check.
 Capability metadata distinguishes an already persisted grant (`persisted`) from
 seek support, which is probed on the actual open descriptor.
+
+
+The embedded browser uses the actual shared InfiniFolder file cards, filename
+rendering, grid and viewport, extracted into this library. Folder's normal and
+floating browsers use these same components. Updated Folder provides its active
+appearance and existing themed thumbnails through the permission-free relay;
+see [the browser API](docs/embedded-browser.md).

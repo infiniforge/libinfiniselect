@@ -33,3 +33,21 @@ When Folder is absent, `ShortcutCollections` uses app-private link directories t
 JSON round-trip, page bounds, caller namespaces, traversal/symlink rejection and target-preserving removal have JVM checks. Cross-app Binder grants, backend loading, storage denial in Folder and UI acceptance require device testing.
 
 [Deferred playlist ownership migration](TODO.md): playlist generation will move to InfiniMedia using this listing API later.
+
+## Shared browser appearance and artwork
+
+Version 0.1.3 adds optional worker-thread `FolderStorage.browserStyle(context)` and
+`FolderStorage.artwork(context, authoritativeUri, sizePx)` requests. Methods
+`io.github.gretchycat.infiniselect.BROWSER_APPEARANCE` and `BROWSER_ARTWORK` use the
+same caller identification as the listing relay. Appearance returns `version=1`
+and a `style` Bundle of FileCardStyle properties. Artwork accepts `uri` and `size`
+(clamped to 16–256 px), resolves metadata with Folder's provider and uses the same
+ResourceIconResolver as its normal/floating browsers. It returns `version=1`,
+`label`, `directory`, and optional `png` (at most 256 KiB and 256×256 pixels).
+No original content URI/grant, credentials or source bytes are returned.
+
+The embedded view loads artwork on two workers, caches a bounded 8 MiB of images,
+and rejects stale callbacks after navigation, mode changes or detach. Failures
+leave a placeholder; older/absent Folder uses host Android appearance. Update
+Folder alongside the client for normal Folder themes and thumbnails. This API
+provides existing artwork; online box-art lookup remains a future caller action.

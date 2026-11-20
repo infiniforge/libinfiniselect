@@ -8,13 +8,15 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.DocumentsContract
 import android.view.Gravity
+import android.view.View
 import android.widget.*
+import io.github.gretchycat.infiniselect.browser.*
 import java.io.File
 import java.util.concurrent.Executors
 
 /**
- * Embeddable source browser. Folder storage is accessed only through its grant-checked
- * DocumentsProvider.
+ * Embeddable source browser. Folder storage is accessed only through its grant-checked relay; file
+ * cards, names, grid and viewport are the normal InfiniFolder renderer.
  */
 class EmbeddedFileBrowser
 @JvmOverloads
@@ -43,7 +45,16 @@ constructor(context: Context, preferredViewMode: FileViewMode? = null) : LinearL
     private val toggle = Button(context)
     private val status = TextView(context)
     private val scroll = ScrollView(context)
-    private val content = GridLayout(context)
+    private val content = LinearLayout(context).apply { orientation = VERTICAL }
+    private var appearance = FileCardStyle.from(context)
+    private var surface: VirtualizedEntrySurface<Entry>? = null
+    @Volatile private var renderGeneration = 0
+    private var artworkExecutor = Executors.newFixedThreadPool(2)
+    private val artworkCache =
+        object : android.util.LruCache<String, FolderStorage.Artwork>(8 * 1024 * 1024) {
+            override fun sizeOf(key: String, value: FolderStorage.Artwork) =
+                value.bitmap.allocationByteCount
+        }
     private var observed: Uri? = null
     private val observer =
         object : ContentObserver(main) {
@@ -79,7 +90,7 @@ constructor(context: Context, preferredViewMode: FileViewMode? = null) : LinearL
 
     init {
         orientation = VERTICAL
-        setBackgroundColor(0xff111922.toInt())
+        setBackgroundColor(appearance.background)
         navigation.gravity = Gravity.CENTER_VERTICAL
         navigation.addView(button("‹") { goBack() })
         path.setTextColor(0xffd8e6ee.toInt())
@@ -91,6 +102,9 @@ constructor(context: Context, preferredViewMode: FileViewMode? = null) : LinearL
         addView(navigation)
         addView(status)
         scroll.addView(content)
+        scroll.setOnScrollChangeListener { _, _, y, _, _ ->
+            surface?.updateViewport(y, scroll.height)
+        }
         addView(scroll, LayoutParams(-1, 0, 1f))
         navigation.visibility = if (breadcrumbsEnabled) VISIBLE else GONE
     }
@@ -109,6 +123,7 @@ constructor(context: Context, preferredViewMode: FileViewMode? = null) : LinearL
      */
     fun open(directory: Uri? = null, label: String = "Virtual root") {
         current = directory
+        scroll.scrollTo(0, 0)
         trail = mutableListOf(directory to label)
         refresh()
     }
@@ -133,9 +148,13 @@ constructor(context: Context, preferredViewMode: FileViewMode? = null) : LinearL
         observed = null
         if (executor.isShutdown) executor = Executors.newSingleThreadExecutor()
         executor.execute {
+            val style =
+                if (FolderStorage.available(context)) FolderStorage.browserStyle(context)
+                else appearance
             val result = runCatching { if (directory == null) roots() else list(directory) }
             main.post {
                 if (token != generation) return@post
+                appearance = style
                 result.fold(
                     {
                         entries = it
@@ -290,61 +309,138 @@ constructor(context: Context, preferredViewMode: FileViewMode? = null) : LinearL
             String(bytes, Charsets.UTF_8)
         }
 
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (w != oldw && w > 0) render() else surface?.updateViewport(scroll.scrollY, scroll.height)
+    }
+
     private fun render() {
+        val revision = ++renderGeneration
         toggle.text = if (iconMode) "☷ List" else "▦ Icons"
         toggle.contentDescription = if (iconMode) "Switch to list view" else "Switch to icon view"
+        setBackgroundColor(appearance.background)
+        path.setTextColor(appearance.textPrimary)
+        status.setTextColor(appearance.textSecondary)
+        surface = null
         content.removeAllViews()
-        content.columnCount = if (iconMode) 2 else 1
-        entries.forEach { entry ->
-            val icon =
-                if (entry.directory) "📁"
-                else if (entry.name.endsWith(".iflink", true)) "↗" else "▱"
-            val item =
-                button(if (iconMode) "$icon\n${entry.label}" else "$icon  ${entry.label}") {
-                    when (entry.uri.toString()) {
-                        "infiniselect://folder-access" ->
-                            onRequestTree(
-                                DocumentsContract.buildDocumentUri(
-                                    FileSelectionContract.INFINIFOLDER_DOCUMENTS_AUTHORITY,
-                                    "root",
-                                )
-                            )
-                        "infiniselect://add-storage" -> onRequestTree(null)
-                        "infiniselect://open" -> onRequestOpen()
-                        else ->
-                            if (entry.directory) {
-                                if (
-                                    entry.uri.scheme == "file" &&
-                                        !entry.relayed &&
-                                        !privateLocation(entry.uri) &&
-                                        !canBrowseLocal()
-                                )
-                                    onRequestLocalAccess()
-                                else {
-                                    current = entry.uri
-                                    trail.add(entry.uri to entry.label)
-                                    refresh()
-                                }
-                            } else select(entry, false)
-                    }
+        val density = resources.displayMetrics.density
+        val iconDp = 56
+        val widthPx = width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+        val columns = if (iconMode) FileViewGrid.columns((widthPx / density).toInt(), iconDp) else 1
+        val cellWidth = widthPx / columns
+        val size = ((if (iconMode) iconDp else 44) * density).toInt().coerceIn(16, 256)
+        val makeCard: (Entry) -> View = { entry ->
+            val card =
+                FileEntryCard(
+                    context,
+                    FileCardEntry(entry.directory, shortcut = entry.name.endsWith(".iflink", true)),
+                    iconMode,
+                    iconDp,
+                    appearance.isDark,
+                    cardTheme = appearance,
+                )
+            val image =
+                ImageView(context).apply {
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    setImageResource(
+                        if (entry.directory) android.R.drawable.ic_menu_agenda
+                        else android.R.drawable.ic_menu_save
+                    )
+                    contentDescription = if (entry.directory) "Folder" else "File"
                 }
-            item.gravity =
-                if (iconMode) Gravity.CENTER else Gravity.CENTER_VERTICAL or Gravity.START
-            item.setOnLongClickListener { anchor ->
+            card.attachIcon(image)
+            card.addLabels(
+                entry.label,
+                entry.directory,
+                (cellWidth - 4 * density).toInt().coerceAtLeast(36),
+                if (entry.directory) "Folder"
+                else
+                    entry.size
+                        ?.let { android.text.format.Formatter.formatShortFileSize(context, it) }
+                        .orEmpty(),
+            )
+            card.container.setOnClickListener { activate(entry) }
+            card.container.setOnLongClickListener { anchor ->
                 if (!entry.directory) {
                     select(entry, true, anchor)
                     true
                 } else false
             }
-            val size = if (iconMode) (120 * resources.displayMetrics.density).toInt() else -2
-            content.addView(
-                item,
-                GridLayout.LayoutParams().apply {
-                    width = 0
-                    height = size
-                    columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
-                },
-            )
+            // Artwork stays in Folder's resolver; no source or permission crosses into the host.
+            if (entry.relayed) {
+                val key =
+                    "${entry.uri}:${entry.modified}:${entry.size}:$size:${appearance.hashCode()}"
+                fun apply(art: FolderStorage.Artwork) {
+                    image.setImageBitmap(art.bitmap)
+                    if (art.label.isNotBlank()) card.nameView.setFileName(art.label, art.directory)
+                }
+                artworkCache.get(key)?.let(::apply)
+                    ?: run {
+                        if (artworkExecutor.isShutdown)
+                            artworkExecutor = Executors.newFixedThreadPool(2)
+                        artworkExecutor.execute {
+                            if (revision != renderGeneration) return@execute
+                            val art =
+                                runCatching { FolderStorage.artwork(context, entry.uri, size) }
+                                    .getOrNull()
+                            if (art != null) {
+                                artworkCache.put(key, art)
+                                main.post {
+                                    if (
+                                        revision == renderGeneration &&
+                                            card.container.isAttachedToWindow
+                                    )
+                                        apply(art)
+                                }
+                            }
+                        }
+                    }
+            }
+            card.container
+        }
+        if (entries.size > 48) {
+            surface =
+                VirtualizedEntrySurface(
+                    context,
+                    entries,
+                    columns,
+                    ((if (iconMode) iconDp + 48 else 64) * density).toInt(),
+                    makeCard,
+                )
+            content.addView(surface)
+            scroll.post { surface?.updateViewport(scroll.scrollY, scroll.height) }
+        } else {
+            content.addView(FileViewGrid.build(context, entries, columns, card = makeCard))
+        }
+    }
+
+    private fun activate(entry: Entry) {
+        when (entry.uri.toString()) {
+            "infiniselect://folder-access" ->
+                onRequestTree(
+                    DocumentsContract.buildDocumentUri(
+                        FileSelectionContract.INFINIFOLDER_DOCUMENTS_AUTHORITY,
+                        "root",
+                    )
+                )
+            "infiniselect://add-storage" -> onRequestTree(null)
+            "infiniselect://open" -> onRequestOpen()
+            else ->
+                if (entry.directory) {
+                    if (
+                        entry.uri.scheme == "file" &&
+                            !entry.relayed &&
+                            !privateLocation(entry.uri) &&
+                            !canBrowseLocal()
+                    )
+                        onRequestLocalAccess()
+                    else {
+                        current = entry.uri
+                        trail.add(entry.uri to entry.label)
+                        scroll.scrollTo(0, 0)
+                        refresh()
+                    }
+                } else select(entry, false)
         }
     }
 
@@ -422,6 +518,8 @@ constructor(context: Context, preferredViewMode: FileViewMode? = null) : LinearL
 
     override fun onDetachedFromWindow() {
         ++generation
+        ++renderGeneration
+        artworkExecutor.shutdownNow()
         observed?.let { context.contentResolver.unregisterContentObserver(observer) }
         observed = null
         executor.shutdownNow()
