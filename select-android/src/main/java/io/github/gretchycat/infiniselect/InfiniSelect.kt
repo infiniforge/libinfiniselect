@@ -51,6 +51,7 @@ data class OpenRequest(
     val writable: Boolean = false,
     /** Offer a "New" action on folders and return the target directory to create this type. */
     val newFileType: NewFileType? = null,
+    val fileActions: List<SelectionAction> = emptyList(),
 ) {
     init {
         require(clientId.matches(Regex("[A-Za-z0-9._-]{1,80}"))) { "clientId must be a short stable identifier" }
@@ -60,6 +61,9 @@ data class OpenRequest(
     }
 
     internal fun toBundle() = Bundle().apply {
+        SelectionAction.validate(fileActions)
+        putStringArrayList(FileSelectionContract.EXTRA_FILE_ACTION_IDS,ArrayList(fileActions.map { it.id }))
+        putStringArrayList(FileSelectionContract.EXTRA_FILE_ACTION_LABELS,ArrayList(fileActions.map { it.label }))
         putString(FileSelectionContract.EXTRA_CLIENT_ID, clientId)
         putString(FileSelectionContract.EXTRA_DISPLAY_NAME, displayName)
         putStringArrayList(FileSelectionContract.EXTRA_MIME_TYPES, ArrayList(mimeTypes))
@@ -163,6 +167,7 @@ data class SelectionResult(
     val isNewFile: Boolean = false,
     val newFileMimeType: String? = null,
     val newFileExtension: String? = null,
+    val actionId: String? = null,
 ) {
     val primaryUri: Uri? get() = playlistUri ?: items.firstOrNull()?.uri
     /** Stable location identity paired with [directoryContentUri]. */
@@ -637,6 +642,7 @@ object InfiniSelect {
         val directoryReference = stableLocation(context,
             intent.getStringExtra(FileSelectionContract.EXTRA_RESULT_DIRECTORY_REFERENCE), directoryAccessUri)
         return SelectionResult(
+            actionId = intent.getStringExtra(FileSelectionContract.EXTRA_RESULT_FILE_ACTION),
             items = items,
             playlistUri = playlist,
             metadataUri = metadata,

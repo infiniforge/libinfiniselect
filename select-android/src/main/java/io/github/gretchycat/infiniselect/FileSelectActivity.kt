@@ -279,6 +279,8 @@ class FileSelectActivity : Activity() {
                     rememberDefaultDirectory(request.clientId, value)
                 }
                 if (resultCode == RESULT_OK && data != null) {
+                    val action=data.getStringExtra(FileSelectionContract.EXTRA_RESULT_FILE_ACTION)
+                    if(action!=null && request.fileActions.none { it.id==action }) { finishWithCancel();return }
                     if (data.getBooleanExtra(FileSelectionContract.EXTRA_FALLBACK_TO_SOURCES, false)) {
                         sourceMessage = data.getStringExtra(FileSelectionContract.EXTRA_FAILURE_MESSAGE)
                         showSourceChooser()
@@ -656,6 +658,8 @@ class FileSelectActivity : Activity() {
             allowMultiple = getBooleanExtra(FileSelectionContract.EXTRA_ALLOW_MULTIPLE, false),
             initialDirectory = getParcelableExtraCompat(FileSelectionContract.EXTRA_INITIAL_DIRECTORY),
             supportedExtensions = getStringArrayListExtra(FileSelectionContract.EXTRA_SUPPORTED_EXTENSIONS).orEmpty(),
+            fileActions = SelectionAction.fromWire(getStringArrayListExtra(FileSelectionContract.EXTRA_FILE_ACTION_IDS).orEmpty(),
+                getStringArrayListExtra(FileSelectionContract.EXTRA_FILE_ACTION_LABELS).orEmpty()),
             newFileType = getStringExtra(FileSelectionContract.EXTRA_NEW_FILE_MIME_TYPE)?.let {
                 NewFileType(it, getStringExtra(FileSelectionContract.EXTRA_NEW_FILE_EXTENSION))
             },

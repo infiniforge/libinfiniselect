@@ -22,6 +22,10 @@ object FileSelectionContract {
     const val STORAGE_EXTRA_RELATIVE_PATH = "io.github.gretchycat.infinifolder.extra.RELATIVE_PATH"
     const val STORAGE_EXTRA_RESOLVED_URI = "io.github.gretchycat.infinifolder.extra.RESOLVED_URI"
 
+    const val EXTRA_FILE_ACTION_IDS = "io.github.gretchycat.infiniselect.FILE_ACTION_IDS"
+    const val EXTRA_FILE_ACTION_LABELS = "io.github.gretchycat.infiniselect.FILE_ACTION_LABELS"
+    const val EXTRA_RESULT_FILE_ACTION = "io.github.gretchycat.infiniselect.RESULT_FILE_ACTION"
+
     const val EXTRA_CLIENT_ID = "io.github.gretchycat.infiniselect.CLIENT_ID"
     const val EXTRA_DISPLAY_NAME = "io.github.gretchycat.infiniselect.DISPLAY_NAME"
     const val EXTRA_MIME_TYPES = "io.github.gretchycat.infiniselect.MIME_TYPES"

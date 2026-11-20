@@ -19,6 +19,8 @@ import java.util.concurrent.Executors
 class EmbeddedFileBrowser(context: Context) : LinearLayout(context) {
     var sortByModified: Boolean = false
     var onSelected: (SelectionItem) -> Unit = {}
+    var fileActions: (SelectionItem) -> List<SelectionAction> = { emptyList() }
+    var onFileAction: (String, SelectionItem) -> Unit = { _, _ -> }
     var onFileMenu: (SelectionItem) -> Unit = {}
     var onRequestTree: (Uri?) -> Unit = {}
     var canBrowseLocal: () -> Boolean = {
@@ -327,9 +329,9 @@ class EmbeddedFileBrowser(context: Context) : LinearLayout(context) {
                 }
             item.gravity =
                 if (iconMode) Gravity.CENTER else Gravity.CENTER_VERTICAL or Gravity.START
-            item.setOnLongClickListener {
+            item.setOnLongClickListener { anchor ->
                 if (!entry.directory) {
-                    select(entry, true)
+                    select(entry, true, anchor)
                     true
                 } else false
             }
@@ -345,7 +347,7 @@ class EmbeddedFileBrowser(context: Context) : LinearLayout(context) {
         }
     }
 
-    private fun select(entry: Entry, menu: Boolean) {
+    private fun select(entry: Entry, menu: Boolean, anchor: android.view.View? = null) {
         val token = generation
         executor.execute {
             val result = runCatching {
@@ -371,7 +373,35 @@ class EmbeddedFileBrowser(context: Context) : LinearLayout(context) {
             main.post {
                 if (token == generation)
                     result.fold(
-                        { if (menu) onFileMenu(it) else onSelected(it) },
+                        { item ->
+                            if (!menu) onSelected(item)
+                            else {
+                                val actions =
+                                    runCatching { SelectionAction.validate(fileActions(item)) }
+                                        .getOrElse {
+                                            onError(it.message ?: "Invalid file actions")
+                                            return@fold
+                                        }
+                                if (actions.isEmpty()) onFileMenu(item)
+                                else
+                                    PopupMenu(context, anchor ?: this)
+                                        .apply {
+                                            this.menu.add(0, 0, 0, "Open")
+                                            actions.forEachIndexed { index, action ->
+                                                this.menu.add(0, index + 1, index + 1, action.label)
+                                            }
+                                            setOnMenuItemClickListener { selected ->
+                                                if (selected.itemId == 0) onSelected(item)
+                                                else
+                                                    actions.getOrNull(selected.itemId - 1)?.let {
+                                                        onFileAction(it.id, item)
+                                                    }
+                                                true
+                                            }
+                                        }
+                                        .show()
+                            }
+                        },
                         { onError(it.message ?: "Cannot open file") },
                     )
             }

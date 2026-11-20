@@ -5,7 +5,8 @@ Version 0.1.1 adds `EmbeddedFileBrowser(context)`, a reusable Android View for a
 ```kotlin
 val browser = EmbeddedFileBrowser(activity).apply {
     onSelected = { item -> openDocument(item) }
-    onFileMenu = { item -> showFileActions(item) } // long press
+    fileActions = { item -> listOf(SelectionAction("add_favorite", "Add to favorites")) }
+    onFileAction = { actionId, item -> handleAppAction(actionId, item) }
     onRequestTree = { initial -> StorageAccess.selectDirectory(activity, 42, initial) }
     onRequestLocalAccess = { requestStoragePermission() }
     onRequestOpen = { openNormalInfiniSelectPicker() }
@@ -25,3 +26,9 @@ The breadcrumb bar contains Back, path and a persistent list/icon toggle. `bread
 `FileShortcut` reads/writes compatible version-1 `.iflink` JSON with `targetUri`, `displayNameOverride`, `targetMimeType`, `targetIsDirectory=false`, `createdAtMillis` and optional `infiniPlaySystem`. It rejects temporary Folder targets, directory links, unknown versions and documents larger than 128 KiB. `writeTo(directory)` atomically creates a link with a stable SHA-256 name or reuses an existing same-identity link, including user-named links. Removing a link never removes the target.
 
 Standalone AAR/JVM checks cover interoperability, malformed/oversized links, bounded reads, repeated writes and separate recent/favorite links. Touch UI, URI grants, provider notifications and accessibility require device acceptance.
+
+## Caller-owned long-press actions
+
+`fileActions: (SelectionItem) -> List<SelectionAction>` supplies labels/IDs dynamically for embedded file menus. The browser displays Open plus those actions; `onFileAction(id, item)` returns control to the caller. Favorites, metadata lookup and artwork services belong to the caller, not this library. The older `onFileMenu` whole-menu callback remains available when the action list is empty.
+
+For a floating single-file selector, set `OpenRequest.fileActions`. Updated InfiniFolder displays those labels on file long press and returns the usual grant-aware selection plus `SelectionResult.actionId`. Handle the action instead of opening the file. IDs/labels travel as bounded contract arrays; only a requested ID is forwarded. Selecting an action closes the picker. Existing folder New/multi-selection actions are preserved; custom file actions apply to single-file read selection. Android's system picker and older Folder builds do not expose this menu and return normal selections. No arbitrary callback code or game-specific operation runs inside the provider.

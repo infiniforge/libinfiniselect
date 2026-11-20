@@ -212,7 +212,7 @@ The inventory contains 10 applications (7 with standalone builds and 3 planned p
 
 **State:** active · **Build:** standalone library build · **Versions:** no published release verified; build declares `0.1.1`
 
-**Purpose:** Reusable Android file open/save selection and resource-resolution client APIs. Owns the optional InfiniFolder picker integration, Android SAF fallback, grant-aware result parsing, distinction between authoritative resource references and current access URIs, and relative playlist resource resolution. It does not depend on the Infinifolder application. Owns the reusable embedded browser View for local/SAF and optional InfiniFolder sources, persistent list/icon and breadcrumb preferences, and interoperable bounded .iflink serialization and identity deduplication.
+**Purpose:** Reusable Android file open/save selection and resource-resolution client APIs. Owns the optional InfiniFolder picker integration, Android SAF fallback, grant-aware result parsing, distinction between authoritative resource references and current access URIs, and relative playlist resource resolution. It does not depend on the Infinifolder application. Owns the reusable embedded browser View for local/SAF and optional InfiniFolder sources, persistent list/icon and breadcrumb preferences, and interoperable bounded .iflink serialization and identity deduplication. Caller-defined file action hooks render long-press options in embedded and updated floating single-file selectors; callers perform the selected action.
 
 **Pinned source dependency closure:** None declared
 
