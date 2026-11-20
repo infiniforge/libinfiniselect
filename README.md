@@ -5,7 +5,7 @@ flow without depending on InfiniFolder's UI or storage implementation.
 
 ## Embedded browser
 
-Version 0.2.0 embeds the complete existing InfiniFolder browser through an Android surface. Folder owns all file views, breadcrumbs, directory navigation, menus, gestures and artwork; InfiniSelect only hosts the surface and forwards commands/results. In-app embedding requires Android 11+ and updated Folder. Other configurations use ordinary file selection, with no second browser implementation. The JSON directory/collection APIs remain available independently. See [the browser gateway](docs/embedded-browser.md) and [relay API](docs/relay-storage.md).
+Version 0.2.1 embeds the complete existing InfiniFolder browser through an Android surface. Folder owns all file views, breadcrumbs, directory navigation, menus, gestures and artwork; InfiniSelect only hosts the surface and forwards commands/results. In-app embedding requires Android 11+ and updated Folder. Other configurations use ordinary file selection, with no second browser implementation. The JSON directory/collection APIs remain available independently. See [the browser gateway](docs/embedded-browser.md) and [relay API](docs/relay-storage.md).
 
 ## Use
 

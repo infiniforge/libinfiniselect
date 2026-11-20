@@ -81,7 +81,7 @@ data class OpenRequest(
         putString(FileSelectionContract.EXTRA_MULTIPLE_DELIVERY, multipleSelectionDelivery.name)
         putString(FileSelectionContract.EXTRA_METADATA_FORMAT, metadataFormat.name)
         putBoolean(FileSelectionContract.EXTRA_ALLOW_RECURSIVE_AUDIO_DIRECTORIES, allowRecursiveAudioDirectories)
-        progressReceiver?.let { putParcelable(FileSelectionContract.EXTRA_PROGRESS_RECEIVER, it) }
+        progressReceiver?.let { putParcelable(FileSelectionContract.EXTRA_PROGRESS_RECEIVER, it.forIpc()) }
         initialDirectory?.let { putParcelable(FileSelectionContract.EXTRA_INITIAL_DIRECTORY, it) }
     }
 }

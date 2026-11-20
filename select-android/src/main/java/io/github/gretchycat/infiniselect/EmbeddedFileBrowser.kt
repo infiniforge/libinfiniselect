@@ -183,51 +183,59 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
                 putParcelable(
                     EmbeddedBrowserProtocol.RECEIVER,
                     object : ResultReceiver(main) {
-                        override fun onReceiveResult(code: Int, data: Bundle?) {
-                            if (token != generation || data == null) return
-                            when (code) {
-                                EmbeddedBrowserProtocol.NAVIGATION -> {
-                                    current =
-                                        data
-                                            .getString(EmbeddedBrowserProtocol.DIRECTORY)
-                                            ?.let(Uri::parse)
-                                    canGoBack = data.getBoolean(EmbeddedBrowserProtocol.CAN_GO_BACK)
-                                }
-                                EmbeddedBrowserProtocol.ERROR ->
-                                    fail(data.getString("message") ?: "Folder browser unavailable")
-                                FileSelectionContract.RESULT_SELECTED -> {
-                                    val uri =
-                                        data
-                                            .getString(FileSelectionContract.EXTRA_RESULT_URI)
-                                            ?.let(Uri::parse) ?: return
-                                    val item =
-                                        SelectionItem(
-                                            uri,
+                            override fun onReceiveResult(code: Int, data: Bundle?) {
+                                if (token != generation || data == null) return
+                                when (code) {
+                                    EmbeddedBrowserProtocol.NAVIGATION -> {
+                                        current =
                                             data
-                                                .getString(FileSelectionContract.EXTRA_RESULT_NAME)
-                                                .orEmpty(),
-                                            data.getString(FileSelectionContract.EXTRA_RESULT_MIME)
-                                                ?: "application/octet-stream",
+                                                .getString(EmbeddedBrowserProtocol.DIRECTORY)
+                                                ?.let(Uri::parse)
+                                        canGoBack =
+                                            data.getBoolean(EmbeddedBrowserProtocol.CAN_GO_BACK)
+                                    }
+                                    EmbeddedBrowserProtocol.ERROR ->
+                                        fail(
+                                            data.getString("message")
+                                                ?: "Folder browser unavailable"
+                                        )
+                                    FileSelectionContract.RESULT_SELECTED -> {
+                                        val uri =
                                             data
-                                                .getLong(
-                                                    FileSelectionContract.EXTRA_RESULT_SIZE,
-                                                    -1L,
-                                                )
-                                                .takeIf { it >= 0 },
-                                            sourceReference =
-                                                data.getString(EmbeddedBrowserProtocol.SOURCE),
-                                        )
-                                    val action =
-                                        data.getString(
-                                            FileSelectionContract.EXTRA_RESULT_FILE_ACTION
-                                        )
-                                    if (action == null) onSelected(item)
-                                    else if (fileActions.any { it.id == action })
-                                        onFileAction(action, item)
+                                                .getString(FileSelectionContract.EXTRA_RESULT_URI)
+                                                ?.let(Uri::parse) ?: return
+                                        val item =
+                                            SelectionItem(
+                                                uri,
+                                                data
+                                                    .getString(
+                                                        FileSelectionContract.EXTRA_RESULT_NAME
+                                                    )
+                                                    .orEmpty(),
+                                                data.getString(
+                                                    FileSelectionContract.EXTRA_RESULT_MIME
+                                                ) ?: "application/octet-stream",
+                                                data
+                                                    .getLong(
+                                                        FileSelectionContract.EXTRA_RESULT_SIZE,
+                                                        -1L,
+                                                    )
+                                                    .takeIf { it >= 0 },
+                                                sourceReference =
+                                                    data.getString(EmbeddedBrowserProtocol.SOURCE),
+                                            )
+                                        val action =
+                                            data.getString(
+                                                FileSelectionContract.EXTRA_RESULT_FILE_ACTION
+                                            )
+                                        if (action == null) onSelected(item)
+                                        else if (fileActions.any { it.id == action })
+                                            onFileAction(action, item)
+                                    }
                                 }
                             }
                         }
-                    },
+                        .forIpc(),
                 )
             }
         calls.execute {

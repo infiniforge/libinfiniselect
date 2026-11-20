@@ -1,6 +1,6 @@
 # Embedding the complete InfiniFolder browser
 
-InfiniSelect 0.2.0 is a gateway to InfiniFolder's complete existing browser. It does
+InfiniSelect 0.2.1 is a gateway to InfiniFolder's complete existing browser. It does
 not implement file listing UI, cards, breadcrumbs, directory history/navigation,
 sorting, gestures, thumbnails or file menus. Those views and behavior remain in
 InfiniFolder. Its floating selector and embedded sessions use the same
@@ -64,7 +64,12 @@ browser in the library.
 `ContentResolver.call` on `com.infinifolder.selection` uses method
 `io.github.gretchycat.infiniselect.EMBED_BROWSER`, protocol version 1. Create
 passes display, dimensions, host input token, caller lifetime Binder,
-ResultReceiver, initial directory/label and selection configuration. It returns
+a platform `android.os.ResultReceiver`, initial directory/label and selection
+configuration. The gateway normalizes callback subclasses through Android's
+ResultReceiver CREATOR before placing them in a Bundle. Only the Binder endpoint
+crosses processes; Folder never has to load a caller's private callback class.
+The same normalization applies to ordinary picker progress callbacks. This fixes
+the 0.2.0 unmarshalling failure without changing protocol version 1. Creation returns
 an opaque session ID, server Binder and SurfacePackage. Subsequent commands carry
 the session ID and run only for the owning UID. Dimensions are bounded at 8192 px;
 at most four sessions per UID and sixteen globally are accepted. Session state
@@ -78,6 +83,9 @@ only the current directory and whether Back is available.
 ## Validation
 
 The standalone AAR/JVM and Android instrumentation APK builds compile the gateway.
+`ResultReceiverTransportTest` round-trips browser/progress callbacks using a
+platform-only class loader and verifies callback payloads and main-handler
+execution. It needs an Android device but no installed Folder or storage access.
 `EmbeddedBrowserDeviceTest` exercises an installed Folder through a real surface:
 Folder-owned filename/breadcrumb accessibility nodes, file selection and read
 grants, breadcrumb navigation after selection and surface re-creation with Folder-owned state restoration. It requires an attached
