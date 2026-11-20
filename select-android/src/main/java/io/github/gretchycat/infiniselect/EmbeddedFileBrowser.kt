@@ -316,6 +316,7 @@ constructor(context: Context, preferredViewMode: FileViewMode? = null) : LinearL
 
     private fun render() {
         val revision = ++renderGeneration
+        artworkCache.evictAll()
         toggle.text = if (iconMode) "☷ List" else "▦ Icons"
         toggle.contentDescription = if (iconMode) "Switch to list view" else "Switch to icon view"
         setBackgroundColor(appearance.background)
@@ -372,7 +373,8 @@ constructor(context: Context, preferredViewMode: FileViewMode? = null) : LinearL
                     "${entry.uri}:${entry.modified}:${entry.size}:$size:${appearance.hashCode()}"
                 fun apply(art: FolderStorage.Artwork) {
                     image.setImageBitmap(art.bitmap)
-                    if (art.label.isNotBlank()) card.nameView.setFileName(art.label, art.directory)
+                    if (entry.name.endsWith(".iflink", true) && art.label.isNotBlank())
+                        card.nameView.setFileName(art.label, art.directory)
                 }
                 artworkCache.get(key)?.let(::apply)
                     ?: run {
@@ -383,7 +385,7 @@ constructor(context: Context, preferredViewMode: FileViewMode? = null) : LinearL
                             val art =
                                 runCatching { FolderStorage.artwork(context, entry.uri, size) }
                                     .getOrNull()
-                            if (art != null) {
+                            if (art != null && revision == renderGeneration) {
                                 artworkCache.put(key, art)
                                 main.post {
                                     if (
