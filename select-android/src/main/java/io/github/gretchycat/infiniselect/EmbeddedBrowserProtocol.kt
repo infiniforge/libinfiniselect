@@ -26,6 +26,7 @@ object EmbeddedBrowserProtocol {
     const val DISPLAY = "display"
     const val DIRECTORY = "directory"
     const val LABEL = "label"
+    const val LOCK_ROOT = "lockRoot"
     const val BREADCRUMBS = "breadcrumbs"
     const val SELECT_LINK_DOCUMENTS = "selectLinkDocuments"
     const val SORT_MODIFIED = "sortModified"

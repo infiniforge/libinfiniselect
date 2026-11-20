@@ -63,6 +63,7 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
     private var savedVersion = -1
     private var savedState: Bundle? = null
     private var initialDirectory: Uri? = null
+    private var lockToDirectory = false
     private var initialLabel = "Virtual root"
     private var current: Uri? = null
     private var canGoBack = false
@@ -88,7 +89,8 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
 
     @android.annotation.TargetApi(30)
     private fun installSurface() {
-        val view = SurfaceView(context)
+        // Android only delivers input to the embedded hierarchy above the host window.
+        val view = SurfaceView(context).apply { setZOrderOnTop(true) }
         surface = view
         addView(view, LayoutParams(-1, -1))
         view.holder.addCallback(
@@ -120,7 +122,16 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
         )
     }
 
-    fun open(directory: Uri? = null, label: String = "Virtual root") {
+    @JvmOverloads
+    fun open(
+        directory: Uri? = null,
+        label: String = "Virtual root",
+        lockToDirectory: Boolean = false,
+    ) {
+        require(!lockToDirectory || directory != null) {
+            "A locked browser needs a starting directory"
+        }
+        this.lockToDirectory = lockToDirectory
         ++openVersion
         initialDirectory = directory
         initialLabel = label
@@ -145,6 +156,7 @@ constructor(context: Context, private val preferredViewMode: FileViewMode? = nul
         Bundle().apply {
             putString(EmbeddedBrowserProtocol.DIRECTORY, initialDirectory?.toString())
             putString(EmbeddedBrowserProtocol.LABEL, initialLabel)
+            putBoolean(EmbeddedBrowserProtocol.LOCK_ROOT, lockToDirectory)
             putBoolean(EmbeddedBrowserProtocol.BREADCRUMBS, breadcrumbsEnabled)
             putBoolean(EmbeddedBrowserProtocol.SORT_MODIFIED, sortByModified)
             putBoolean(EmbeddedBrowserProtocol.SELECT_LINK_DOCUMENTS, selectLinkDocuments)

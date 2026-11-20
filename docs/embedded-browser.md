@@ -1,6 +1,6 @@
 # Embedding the complete InfiniFolder browser
 
-InfiniSelect 0.2.1 is a gateway to InfiniFolder's complete existing browser. It does
+InfiniSelect 0.2.2 is a gateway to InfiniFolder's complete existing browser. It does
 not implement file listing UI, cards, breadcrumbs, directory history/navigation,
 sorting, gestures, thumbnails or file menus. Those views and behavior remain in
 InfiniFolder. Its floating selector and embedded sessions use the same
@@ -34,6 +34,18 @@ An updated installed Folder is required for in-app embedding. Without it, or on
 Android 8–10, this View offers a single Open files action through `onRequestOpen`,
 which the host wires to ordinary InfiniSelect/Android selection. There is no
 replacement file browser. Apps remain independently buildable/installable.
+
+`open(directory, label, lockToDirectory = true)` asks Folder to use that directory
+as its top level. Breadcrumbs, Back, saved surface state and load-error recovery
+stay anchored there; children remain browsable. The default is unrestricted
+Virtual root navigation. Open/Browse should use `open()`; Recents/Favorites can
+lock to their respective collection roots. This is a navigation boundary, not a
+replacement for storage permissions. The optional version-1 `lockRoot` field
+requires Folder 0.1.9+; older Folder builds ignore it.
+
+The hosting SurfaceView is above its host window so Android can deliver touch
+to Folder. Folder uses a flat, unelevated embedded root to avoid floating-window
+shadow insets and offset content. Floating-window appearance remains Folder-owned.
 
 `breadcrumbsEnabled` controls Folder's whole browser toolbar, including the
 list/icon toggle. Folder owns the actual trail and its clickable ancestors.
